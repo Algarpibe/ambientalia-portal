@@ -184,25 +184,40 @@ function bloqueAdjunto(s: Solicitud): string {
 
 function acuseSolicitante(s: Solicitud) {
   const esInc = s.tipo === 'incapacidad';
+  // La registró administración a su nombre (migración 080, la puerta de
+  // `registrarIncapacidadAjena`). Cambia SOLO el texto: darle las gracias por
+  // reportarla sería falso, porque no la reportó él. Destinatarios, calendario
+  // y hoja siguen siendo los de siempre.
+  //
+  // `Boolean(...)` y no `!== null`: un objeto montado a mano sin la clave —los
+  // dobles de los tests— daría `undefined !== null`, o sea `true`, y pondría el
+  // texto de administración en una incapacidad que informó la propia persona.
+  const porAdministracion = esInc && Boolean(s.registradaPor);
   // No hay correo de avance intermedio: el empleado recibe este acuse y el
   // veredicto, dos correos. Por eso el acuse anuncia el circuito de dos firmas
   // cuando lo hay, para que la espera no sorprenda.
-  const cierre = esInc
-    ? 'Muchas gracias por reportar tu incapacidad. Esperamos tu pronta recuperación.'
-    : s.segundoAprobadorCorreo
-      ? 'Tu solicitud pasa por dos aprobaciones: primero tu jefe inmediato y después su superior. Te informaremos por este medio del resultado final.'
-      : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
+  const cierre = porAdministracion
+    ? 'Esperamos tu pronta recuperación.'
+    : esInc
+      ? 'Muchas gracias por reportar tu incapacidad. Esperamos tu pronta recuperación.'
+      : s.segundoAprobadorCorreo
+        ? 'Tu solicitud pasa por dos aprobaciones: primero tu jefe inmediato y después su superior. Te informaremos por este medio del resultado final.'
+        : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
   return {
     para: esInc ? destinatarios(s.solicitanteEmail, COPIA_INCAPACIDADES, s.copiaCorreo) : s.solicitanteEmail,
-    asunto: esInc
-      ? '¡Reporte de incapacidad registrado exitosamente!'
-      : `¡Solicitud ${PERIODO[s.tipo]} registrada exitosamente!`,
+    asunto: porAdministracion
+      ? 'Administración ha registrado tu incapacidad'
+      : esInc
+        ? '¡Reporte de incapacidad registrado exitosamente!'
+        : `¡Solicitud ${PERIODO[s.tipo]} registrada exitosamente!`,
     cuerpo: [
       `¡Hola ${s.empleadoNombre}!`,
       '',
-      esInc
-        ? 'Tu reporte de incapacidad ha quedado registrado. Este es el resumen:'
-        : `Tu solicitud ${PERIODO[s.tipo]} ha sido registrada. Este es el resumen:`,
+      porAdministracion
+        ? 'Administración ha registrado tu incapacidad en el portal. Este es el resumen:'
+        : esInc
+          ? 'Tu reporte de incapacidad ha quedado registrado. Este es el resumen:'
+          : `Tu solicitud ${PERIODO[s.tipo]} ha sido registrada. Este es el resumen:`,
       '',
       bloqueResumen(s),
       bloqueComentarios(s) + bloqueAdjunto(s),

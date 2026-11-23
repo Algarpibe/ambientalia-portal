@@ -226,6 +226,40 @@ describe('correos', () => {
     expect(p.correo.cuerpo).toContain('pronta recuperación');
   });
 
+  it('si la registró administración lo dice, y no le da las gracias por reportarla', () => {
+    // No la reportó él: la registró administración a su nombre (migración 080).
+    const p = construirPayload(
+      solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf, registradaPor: 'admin@ambientalia.com.co' }),
+      'registrada',
+    );
+    expect(p.correo.asunto).toBe('Administración ha registrado tu incapacidad');
+    expect(p.correo.cuerpo).toContain('¡Hola Ana Ruiz!');
+    expect(p.correo.cuerpo).toContain('Administración ha registrado tu incapacidad en el portal. Este es el resumen:');
+    expect(p.correo.cuerpo).toContain('Esperamos tu pronta recuperación.');
+    expect(p.correo.cuerpo).not.toMatch(/gracias|Tu reporte de incapacidad/i);
+    // El resumen, los comentarios y el adjunto de siempre.
+    expect(p.correo.cuerpo).toContain('📅 Fecha primer día de incapacidad: 2026-07-06');
+    expect(p.correo.cuerpo).toContain('Comentarios: Viaje familiar');
+    expect(p.correo.cuerpo).toContain('📎 Documento adjunto: Incapacidades_Ana_Ruiz_2026-07-06_1.pdf');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it('CANDADO: registradaPor cambia el texto y NADA más: ni destinatarios, ni calendario, ni hoja', () => {
+    const base = solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf });
+    const propia = construirPayload(base, 'registrada');
+    const ajena = construirPayload({ ...base, registradaPor: 'admin@ambientalia.com.co' }, 'registrada');
+    expect(ajena.correo.para).toBe(propia.correo.para);
+    expect(ajena.calendario).toEqual(propia.calendario);
+    expect(ajena.hoja).toEqual(propia.hoja);
+    expect(ajena.correo.asunto).not.toBe(propia.correo.asunto);
+  });
+
+  it('sin registradaPor, el acuse de la incapacidad sigue siendo el de siempre', () => {
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf }), 'registrada');
+    expect(p.correo.asunto).toBe('¡Reporte de incapacidad registrado exitosamente!');
+    expect(p.correo.cuerpo).toContain('Muchas gracias por reportar tu incapacidad. Esperamos tu pronta recuperación.');
+  });
+
   it('menciona el adjunto solo si existe', () => {
     expect(construirPayload(solicitud({ adjunto: pdf }), 'creada').correo.cuerpo).toContain(
       'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf',

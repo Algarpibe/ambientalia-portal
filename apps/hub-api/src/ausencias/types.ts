@@ -616,7 +616,7 @@ export interface Solicitud {
    * adjuntos, GET por id): esos lectores ya reciben los demás correos de la
    * solicitud, pero nadie debe darlo por interno.
    *
-   * Lo leerá el acuse (`acuseSolicitante`): con valor, el correo dirá que la ha
+   * Lo lee el acuse (`acuseSolicitante`): con valor, el correo dice que la ha
    * registrado administración en vez de darle las gracias por reportarla.
    */
   registradaPor: string | null;
