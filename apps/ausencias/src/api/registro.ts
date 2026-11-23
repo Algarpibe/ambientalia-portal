@@ -84,6 +84,12 @@ interface MovimientoBase {
   createdAt: string;
   /** `comentarios` en una solicitud; `motivo` en una anulación o un cambio. */
   motivo: string | null;
+  /**
+   * El correo del administrador que la registró a nombre de la persona
+   * (migración 080), o `null` si la registró ella misma o viene de la hoja.
+   * SIEMPRE `null` en una modificación. Espejo de `MovimientoBase` en hub-api.
+   */
+  registradaPor: string | null;
 }
 
 /**

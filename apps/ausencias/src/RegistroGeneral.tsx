@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   borrarModificacion,
   borrarSolicitud,
@@ -26,6 +26,7 @@ import {
 } from './dominio';
 import EditarSolicitud from './EditarSolicitud';
 import EditarModificacion from './EditarModificacion';
+import RegistrarIncapacidad from './RegistrarIncapacidad';
 import { lineasDelCsv } from './registroCsv';
 
 // El registro general: lo que antes había que ir a mirar a la hoja. Cada fila ya
@@ -185,7 +186,10 @@ interface Props {
   recargarToken: number;
   /** Festivos del contexto, para sugerir el conteo de días al editar. */
   festivos: Set<string>;
-  /** Editar y borrar son solo suyos. También decide qué alcance anuncia el subtítulo. */
+  /**
+   * Editar, borrar y registrar una incapacidad a nombre de otro son solo suyos.
+   * También decide qué alcance anuncia el subtítulo.
+   */
   esAdmin: boolean;
   /** Si se dibuja el botón del CSV. Quien de verdad recorta lo que sale es el servidor. */
   puedeExportar: boolean;
@@ -263,6 +267,11 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
   // que no salen de la solicitud corregida —`decididaPor`, sobre todo—, así que
   // reconstruirlo aquí sería otro mapeo capaz de desviarse en silencio.
   const [recargaLocal, setRecargaLocal] = useState(0);
+  // El formulario de «Registrar incapacidad» abierto, y el aviso verde de la
+  // última registrada. El aviso vive fuera del modal porque el modal se cierra
+  // al guardar bien, y lo que hay que ver justo entonces es que salió.
+  const [registrando, setRegistrando] = useState(false);
+  const [exito, setExito] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -401,6 +410,12 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
         </div>
       )}
 
+      {exito && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {exito}
+        </div>
+      )}
+
       {avisoPropuesta && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -498,6 +513,23 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                 <Download className="h-4 w-4" /> Exportar CSV
               </button>
             )}
+            {/* Solo admin: la ruta va detrás de `requireAdmin`, y a un jefe este
+                botón solo le devolvería un 403. Y solo con fichas cargadas: esta
+                barra se pinta también cuando la carga falla (basta `!cargando`),
+                y entonces `empleados` está vacío. Con la guarda, el desplegable
+                de personas del formulario nunca abre vacío. */}
+            {esAdmin && empleados.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setExito(null);
+                  setRegistrando(true);
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+              >
+                <Plus className="h-4 w-4" /> Registrar incapacidad
+              </button>
+            )}
           </div>
 
           <div className="mb-3 flex flex-wrap gap-4 text-sm">
@@ -587,6 +619,19 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                         <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chip.clase}`}>
                           {chip.label}
                         </span>
+                        {/* La constancia de la 080: esta fila no la registró la
+                            propia persona. Quién fue va en el `title`, y se ve
+                            igual para el admin que para los jefes. */}
+                        {m.registradaPor && (
+                          <div className="mt-1">
+                            <span
+                              title={m.registradaPor}
+                              className="inline-block rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-800"
+                            >
+                              Registrada por administración
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">
                         {/* `formatInstante` y no `formatFecha`: `decididaAt` es un
@@ -722,6 +767,21 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
             // tras corregir una solicitud: el movimiento tiene campos que la
             // respuesta del PATCH no trae (`decididaPor`), y reconstruirlo aquí
             // sería otro mapeo capaz de desviarse en silencio.
+            setRecargaLocal((n) => n + 1);
+          }}
+        />
+      )}
+
+      {registrando && (
+        <RegistrarIncapacidad
+          empleados={empleados}
+          onCerrar={() => setRegistrando(false)}
+          onRegistrada={(s) => {
+            setRegistrando(false);
+            setExito(`Incapacidad de ${s.empleadoNombre} registrada. Le hemos enviado el acuse por correo.`);
+            // Por el MISMO camino que la carga inicial, igual que tras corregir:
+            // el movimiento nuevo trae campos que la respuesta del alta no trae
+            // (`decididaPor`, la etiqueta), y reconstruirlo aquí sería otro mapeo.
             setRecargaLocal((n) => n + 1);
           }}
         />
