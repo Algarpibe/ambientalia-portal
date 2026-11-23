@@ -23,10 +23,13 @@ describe('migracion 080', () => {
     // Los casts no son estilo: las columnas de information_schema son dominios,
     // y el driver devuelve como texto lo que no reconoce.
     const { rows } = await db.query(
-      `SELECT data_type::text AS tipo, character_maximum_length::int AS largo, is_nullable::text AS nulable
+      `SELECT data_type::text AS tipo, character_maximum_length::int AS largo, is_nullable::text AS nulable,
+              column_default::text AS por_defecto
          FROM information_schema.columns
         WHERE table_schema = 'portal' AND table_name = 'solicitudes_ausencia' AND column_name = 'registrada_por'`,
     );
-    expect(rows).toEqual([{ tipo: 'character varying', largo: 254, nulable: 'YES' }]);
+    // Sin valor por defecto: con uno, toda solicitud que registra la propia persona
+    // pareceria registrada por un administrador.
+    expect(rows).toEqual([{ tipo: 'character varying', largo: 254, nulable: 'YES', por_defecto: null }]);
   });
 });
