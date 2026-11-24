@@ -70,6 +70,7 @@ function sv(ingreso: string | null, fechaLimite: string | null, extra: Partial<S
     tipoOrigen: fechaLimite ? 'desk' : null,
     tipoDesk: fechaLimite ? 'Diagnóstico' : '',
     tipoManual: null,
+    tipoSugerido: null,
     ...extra,
   };
 }

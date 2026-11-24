@@ -7,7 +7,7 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
-import { fechaEfectiva, type CalibracionGuardada } from './calibraciones.js';
+import { calibracionAlIngreso, fechaEfectiva, type CalibracionGuardada } from './calibraciones.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { CLIENTE_POR_SERIAL, EN_INVENTARIO } from './inventario.js';
@@ -15,6 +15,7 @@ import {
   asuntoSinCodigo,
   categoriaCoherente,
   categoriaDeEstado,
+  CLAVE_TIPO_SUGERIDO,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
@@ -40,6 +41,7 @@ import {
   TIPO_POR_DEFECTO,
   tipoEfectivo,
   tiposDeTickets,
+  tipoSugerido,
   type CategoriaEstado,
   type ContactoCliente,
   type ContactoEquipo,
@@ -47,6 +49,7 @@ import {
   type FlujoAgenda,
   type RolEstado,
   type TicketContacto,
+  type TipoSugerido,
 } from './dominio.js';
 import { vaPorContrato, vigenciaDeEquipo } from './marcas.js';
 import { calcularReloj, type IntervaloEstado } from './plazos.js';
@@ -128,6 +131,16 @@ const COLS_EQUIPO = `
   e.ultima_entrada::text AS ultima_entrada, e.ultima_calibracion::text AS ultima_calibracion,
   e.entradas_st, e.calibraciones_periodo, e.correctivos_periodo, e.activo, e.en_seguimiento`;
 
+/** Las calibraciones guardadas de cada equipo, por su clave (las que no tienen clave no son de ningún equipo del inventario). */
+function calibracionesPorEquipo(calibraciones: readonly CalibracionGuardada[]): Map<string, CalibracionGuardada[]> {
+  const m = new Map<string, CalibracionGuardada[]>();
+  for (const c of calibraciones) if (c.clave) m.set(c.clave, [...(m.get(c.clave) ?? []), c]);
+  return m;
+}
+
+/** Lo que piden `vigenciaDeEquipo` y `vaPorContrato` (marcas.ts) de una fila de equipo: su marca, su cliente y si está en seguimiento. */
+const grupoDe = (r: Row) => ({ marca: r.marca ?? '', cliente: r.cliente ?? '', enSeguimiento: r.en_seguimiento !== false });
+
 /**
  * Equipos activos con su seguimiento, el estado calculado a fecha `hoy` y el
  * ticket abierto en Zoho Desk, si lo hay.
@@ -148,10 +161,8 @@ const COLS_EQUIPO = `
  */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
   const [{ rows }, deDesk, manuales, calibraciones, { vigencias, contratos }] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db), leerVigencias(db)]);
-  const calibracionesDe = new Map<string, CalibracionGuardada[]>();
-  for (const c of calibraciones) if (c.clave) calibracionesDe.set(c.clave, [...(calibracionesDe.get(c.clave) ?? []), c]);
+  const calibracionesDe = calibracionesPorEquipo(calibraciones);
   const ultimaDe = (r: Row): string | null => fechaEfectiva(calibracionesDe.get(r.clave) ?? [], r.ultima_calibracion, hoy);
-  const grupoDe = (r: Row) => ({ marca: r.marca ?? '', cliente: r.cliente ?? '', enSeguimiento: r.en_seguimiento !== false });
   const vigenciaDe = (r: Row): number | null => vigenciaDeEquipo(grupoDe(r), vigencias, contratos);
   const manualDe = new Map(manuales.map((m) => [m.clave, m]));
   const porSerial = new Map<string, number>();
@@ -383,6 +394,21 @@ function clienteDeServicio(r: Row): { cliente: string; origen: OrigenCliente } {
 }
 
 /**
+ * El equipo del inventario de cada serial (`serialNorm`), para sugerir el tipo de un servicio (2026-11-24). `filas` son las de
+ * `consultarEquipos`: sólo equipos activos del inventario. Con el serial repetido, el de clave más baja: el mismo que elige
+ * `CLIENTE_POR_SERIAL` cuando hay alguno activo en el inventario. Un equipo retirado no da sugerencia.
+ */
+function equipoPorSerial(filas: readonly Row[]): Map<string, Row> {
+  const m = new Map<string, Row>();
+  for (const r of filas) {
+    const s = serialNorm(r.serial);
+    const otro = m.get(s);
+    if (s && (!otro || String(r.clave) < String(otro.clave))) m.set(s, r);
+  }
+  return m;
+}
+
+/**
  * Todos los tickets de Desk que no están cerrados —de cualquier marca, con o
  * sin serial: esta vista va de tickets, no de equipos— con su fecha límite a
  * fecha `hoy`.
@@ -411,9 +437,16 @@ function clienteDeServicio(r: Row): { cliente: string; origen: OrigenCliente } {
  * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
  * Colombia de created_time. El cliente lo resuelve `clienteDeServicio`: el del
  * equipo del maestro con ese serial y, si no, lo que viaje en `raw`.
+ *
+ * Un ticket sin tipo lleva además `tipoSugerido` (2026-11-24; la regla es
+ * `tipoSugerido`, dominio.ts): con el equipo ACTIVO DEL INVENTARIO de su serial
+ * (`consultarEquipos`, la misma lectura de `INVENTARIO` que `listarEquipos`; no
+ * `CLIENTE_POR_SERIAL`, que sólo da el nombre del cliente), la vigencia de ese
+ * equipo y la calibración que contaba el día de entrada
+ * (`calibracionAlIngreso`). Sólo se sugiere: aquí no se escribe nada.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
-  const [{ rows }, { tipos, plazos }, conRol, historial] = await Promise.all([
+  const [{ rows }, { tipos, plazos }, conRol, historial, equipos, calibraciones, { vigencias, contratos }] = await Promise.all([
     db.query(
       `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
               COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
@@ -446,8 +479,27 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
          FROM portal.tmc_estados_historial h
         WHERE h.numero IN (SELECT t.number FROM desk.tickets t WHERE ${TICKET_ABIERTO})`,
     ),
+    // El tipo sugerido: los equipos del inventario, sus calibraciones guardadas y la vigencia de cada marca (lo mismo que GET /equipos).
+    consultarEquipos(db),
+    leerCalibraciones(db),
+    leerVigencias(db),
   ]);
   const porClave = new Map(tipos.map((t) => [t.clave, t]));
+  const equipoDe = equipoPorSerial(equipos.rows as Row[]);
+  const calibracionesDe = calibracionesPorEquipo(calibraciones);
+  const sugerible = porClave.get(CLAVE_TIPO_SUGERIDO) ?? null;
+  /** El tipo que se sugiere a un ticket: sin equipo del inventario con su serial, o sin día de entrada, ninguno. */
+  const sugeridoDe = (serial: unknown, tipo: string, ingreso: string | null): TipoSugerido | null => {
+    const q = equipoDe.get(serialNorm(serial));
+    if (!q || !ingreso) return null;
+    return tipoSugerido({
+      tipo,
+      ultimaCalibracion: calibracionAlIngreso(calibracionesDe.get(q.clave) ?? [], q.ultima_calibracion, ingreso),
+      vigencia: vigenciaDeEquipo(grupoDe(q), vigencias, contratos),
+      ingreso,
+      sugerible,
+    });
+  };
   const roles = new Map<string, RolEstado>();
   for (const r of conRol.rows as Row[]) if (esRolEstado(r.rol)) roles.set(r.clave, r.rol);
   const rolDe = (clave: string): RolEstado => roles.get(clave) ?? ROL_POR_DEFECTO;
@@ -494,6 +546,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
       tipoOrigen,
       tipoDesk,
       tipoManual: tipoOrigen === 'manual' && manualClave !== null ? { clave: manualClave, por: r.manual_por, en: r.manual_en } : null,
+      tipoSugerido: sugeridoDe(r.serial, tipoServicio, r.ingreso),
       estado: r.status,
       ingreso: r.ingreso,
       plazoDias,
