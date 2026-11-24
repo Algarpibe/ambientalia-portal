@@ -56,6 +56,10 @@ export const api = {
   fijarTipoServicio: (numero: number, tipo: string | null) => request<Servicios>('PUT', `/servicios/${numero}/tipo`, { tipo }),
   plazos: () => request<{ plazos: PlazoServicio[] }>('GET', '/plazos'),
   guardarPlazo: (tipo: string, dias: number | null) => request<{ plazos: PlazoServicio[] }>('PUT', '/plazos', { tipo, dias }),
+  /** Crea un tipo de servicio (2026-11-24; `dias` null = sin plazo). Devuelve la lista entera; 409 `tipo_existente` si ya hay uno así. */
+  crearTipo: (tipo: string, dias: number | null) => request<{ plazos: PlazoServicio[] }>('POST', '/plazos', { tipo, dias }),
+  /** Borra un tipo creado en la app que ningún ticket abierto usa, con sus días en la agenda. 409 `tipo_sembrado` / `tipo_en_uso`, 404 `tipo_no_encontrado`. */
+  borrarTipo: (clave: string) => request<{ plazos: PlazoServicio[] }>('DELETE', `/plazos/${encodeURIComponent(clave)}`),
   /** Los estados de Desk con su rol en el reloj del plazo (bloque «Estados de Desk» de Configuracion). */
   estados: () => request<{ estados: EstadoDesk[] }>('GET', '/estados'),
   /** Elige el rol de un estado de Desk: cuenta, standby (reloj en pausa) o terminado (reloj parado). Devuelve la lista entera ya actualizada. */

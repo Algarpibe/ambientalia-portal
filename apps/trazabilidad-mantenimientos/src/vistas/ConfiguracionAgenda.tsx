@@ -38,6 +38,8 @@ export interface AgendaConfig {
   guardando: string | null;
   editable: boolean;
   guardar: (bloque: Bloque, clave: string, pedir: () => Promise<ConfiguracionAgenda>, aviso: string) => Promise<void>;
+  /** Vuelve a leer la configuración y los tipos (tras crear o borrar un tipo en «Plazos», 2026-11-24), en la misma fila que los cambios. */
+  recargar: () => Promise<void>;
 }
 
 /** La configuración de la agenda, cargada una vez para los tres bloques. Los cambios van en fila: cada respuesta trae la configuración entera y no deben pisarse. */
@@ -49,17 +51,23 @@ export function useAgendaConfig(notificar: (msg: string) => void): AgendaConfig 
   const editable = usePermisos().puede('config.write');
   const cola = useRef<Promise<void>>(Promise.resolve());
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [c, p] = await Promise.all([api.configuracionAgenda(), api.plazos()]);
-        setConfig(c);
-        setPlazos(p.plazos);
-      } catch (e) {
-        setError({ bloque: 'puestos', mensaje: (e as Error).message });
-      }
-    })();
+  /** La configuración y los tipos de «Plazos» (de ellos salen las columnas de las duraciones). */
+  const cargar = useCallback(async () => {
+    try {
+      const [c, p] = await Promise.all([api.configuracionAgenda(), api.plazos()]);
+      setConfig(c);
+      setPlazos(p.plazos);
+    } catch (e) {
+      setError({ bloque: 'puestos', mensaje: (e as Error).message });
+    }
   }, []);
+
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
+
+  // Tras crear o borrar un tipo en «Plazos» cambian las columnas y los días: se relee, en la fila de los cambios para no pisarlos.
+  const recargar = useCallback(() => (cola.current = cola.current.then(cargar)), [cargar]);
 
   const guardar = useCallback<AgendaConfig['guardar']>(
     (bloque, clave, pedir, aviso) => {
@@ -80,7 +88,7 @@ export function useAgendaConfig(notificar: (msg: string) => void): AgendaConfig 
     [notificar],
   );
 
-  return { config, plazos, error, guardando, editable, guardar };
+  return { config, plazos, error, guardando, editable, guardar, recargar };
 }
 
 function ErrorDe({ agenda, bloque }: { agenda: AgendaConfig; bloque: Bloque }) {
