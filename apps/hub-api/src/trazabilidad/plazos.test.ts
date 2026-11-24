@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CONTACTO_MAX_EMAILS, ROLES_ESTADO, TIPOS_COMPUESTOS, TIPOS_SEMBRADOS, claveTipoServicio, type RolEstado } from './dominio.js';
 import { ROLES_APP } from './roles.js';
+import { TzError, parseClaveTipo, parseTipoNuevo } from './types.js';
 import { calcularPlazo, calcularReloj, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles, type DatosReloj, type IntervaloEstado } from './plazos.js';
 
 // Calendario de referencia (octubre de 2026): el lunes 5 es hábil, el lunes 12
@@ -505,6 +506,49 @@ describe('TIPOS_SEMBRADOS: los tipos que no se borran desde la app', () => {
     const sembradas = [...clavesSembradas('043_trazabilidad_plazos.sql'), ...clavesSembradas('045_trazabilidad_tipo_combinado.sql')];
     expect(sembradas).toHaveLength(7);
     expect([...TIPOS_SEMBRADOS].sort()).toEqual(sembradas.sort());
+  });
+});
+
+describe('crear un tipo: el cuerpo de POST /trazabilidad/plazos (parseTipoNuevo) y la clave de DELETE (parseClaveTipo)', () => {
+  /** El 400 que da, como [campo, mensaje]; null si no da error. */
+  const error = (f: () => unknown): [string | undefined, string] | null => {
+    try {
+      f();
+      return null;
+    } catch (e) {
+      if (e instanceof TzError && e.status === 400) return [e.field, e.messageEs];
+      throw e;
+    }
+  };
+
+  it('el nombre, sin los espacios de los extremos; días entre 1 y 365, o vacíos (sin plazo)', () => {
+    expect(parseTipoNuevo({ tipo: '  Reparación  ', dias: 5 })).toEqual({ tipo: 'Reparación', dias: 5 });
+    for (const dias of [1, 365]) expect(parseTipoNuevo({ tipo: 'Reparación', dias }).dias).toBe(dias);
+    for (const dias of [null, undefined, '']) expect(parseTipoNuevo({ tipo: 'Reparación', dias })).toEqual({ tipo: 'Reparación', dias: null });
+  });
+
+  it('el nombre, con la regla de errorNombreTipo: vacío, sólo símbolos, más de 80 o un compuesto → 400 en «tipo»', () => {
+    expect(error(() => parseTipoNuevo({ dias: 3 }))).toEqual(['tipo', 'Escribe el nombre del tipo de servicio.']);
+    expect(error(() => parseTipoNuevo({ tipo: '   ', dias: 3 }))).toEqual(['tipo', 'Escribe el nombre del tipo de servicio.']);
+    expect(error(() => parseTipoNuevo({ tipo: '*', dias: 3 }))).toEqual(['tipo', 'El nombre tiene que llevar al menos una letra o un número.']);
+    expect(error(() => parseTipoNuevo({ tipo: 'a'.repeat(81), dias: 3 }))).toEqual(['tipo', 'El nombre no puede pasar de 80 caracteres.']);
+    expect(error(() => parseTipoNuevo({ tipo: ' diagnostico + CALIBRACIÓN ', dias: null }))?.[1]).toMatch(/es un tipo compuesto/);
+    expect(error(() => parseTipoNuevo({ tipo: 7, dias: 3 }))).toEqual(['tipo', '«tipo» debe ser texto.']);
+    expect(error(() => parseTipoNuevo(null))).toEqual(['body', 'El cuerpo de la petición no es válido.']);
+  });
+
+  it('días fuera de 1..365, con decimales o como texto → 400 en «dias», con el mensaje de editar un plazo', () => {
+    for (const dias of [0, 366, -1, 1.5, '5', true]) {
+      expect(error(() => parseTipoNuevo({ tipo: 'Reparación', dias }))).toEqual(['dias', 'El plazo debe ser un número entero de días hábiles entre 1 y 365, o quedar vacío.']);
+    }
+  });
+
+  it('la clave de la ruta tiene que ser la normalizada, no vacía y de 80 caracteres como mucho', () => {
+    expect(parseClaveTipo('reparacion')).toBe('reparacion');
+    expect(parseClaveTipo('revision externa')).toBe('revision externa');
+    for (const v of ['', 'Reparación', ' reparacion', 'revision  externa', 'a'.repeat(81), undefined, 7]) {
+      expect(error(() => parseClaveTipo(v))).toEqual(['clave', '«clave» no es la clave de un tipo de servicio.']);
+    }
   });
 });
 
