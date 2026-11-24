@@ -67,7 +67,7 @@ administradores del portal).
 
 ## Servidor (hub-api)
 
-- `POST /trazabilidad/plazos` `{ tipo, dias }` → 201 con `{ plazos }`, la lista
+- `POST /trazabilidad/plazos` `{ tipo, dias }` → 200 con `{ plazos }`, la lista
   ya actualizada, igual que el `PUT`. Errores: 400 de validación, 409
   `tipo_existente`.
 - `DELETE /trazabilidad/plazos/:clave` → 200 con `{ plazos }`. Errores: 404
@@ -109,7 +109,7 @@ administradores del portal).
   vacíos) y la regla `borrable` (sembrado, en uso, sin uso).
 - Una prueba que vigila que `TIPOS_SEMBRADOS` es exactamente lo que siembran la
   043 y la 045, leyendo los .sql.
-- BD (`*.db.test.ts`): crear (201 y fila firmada), duplicado con otra grafía
+- BD (`*.db.test.ts`): crear (200 y fila firmada), duplicado con otra grafía
   (409), borrar un tipo sin uso con sus duraciones (200, sin tocar la `'*'` ni
   otras), borrar uno en uso (409), uno sembrado (409) y uno inexistente (404).
 - Router: permisos (sin `config.write` → 403) y códigos de error.
