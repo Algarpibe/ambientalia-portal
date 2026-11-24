@@ -5,6 +5,7 @@ import { estadoCalibracion } from './dominio.js';
 import { CAMPO_INTERNO, ETIQUETA_CAMPO, crearLectorCalibraciones } from './calibraciones-desk2.js';
 import {
   FECHA_MINIMA_CALIBRACION,
+  calibracionAlIngreso,
   calibracionQueCuenta,
   fechaEfectiva,
   leerFechaCampo,
@@ -68,6 +69,19 @@ describe('última calibración de un equipo', () => {
     expect(fechaEfectiva([], null, HOY)).toBeNull();
     expect(fechaEfectiva([fila({ fecha: '2026-01-15' })], '2025-02-02', HOY)).toBe('2026-01-15');
     expect(fechaEfectiva([fila({ estado: 'anulada' })], '2025-02-02', HOY)).toBeNull();
+  });
+
+  it('`calibracionAlIngreso` (tipo sugerido de «Servicios»): la que contaba el día de entrada; una posterior no cuenta, y el respaldo sólo si no es posterior', () => {
+    const ingreso = '2026-10-01';
+    // Calibrado durante el servicio (el 3 de octubre): el día de entrada contaba la de marzo del año anterior.
+    expect(calibracionAlIngreso([fila({ fecha: '2025-03-12', origen: 'fst022' }), fila({ fecha: '2026-10-03', origen: 'manual' })], null, ingreso)).toBe('2025-03-12');
+    // Con alguna fila manda la regla aunque ninguna cuente ese día: el respaldo no se mira.
+    expect(calibracionAlIngreso([fila({ fecha: '2026-10-03', ticket: 7 })], '2025-03-12', ingreso)).toBeNull();
+    // Sin ninguna fila, el respaldo del inventario, si no es posterior al ingreso.
+    expect(calibracionAlIngreso([], '2025-03-12', ingreso)).toBe('2025-03-12');
+    expect(calibracionAlIngreso([], ingreso, ingreso)).toBe(ingreso);
+    expect(calibracionAlIngreso([], '2026-10-02', ingreso)).toBeNull();
+    expect(calibracionAlIngreso([], null, ingreso)).toBeNull();
   });
 
   describe('corrección manual', () => {
