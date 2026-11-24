@@ -80,7 +80,7 @@ describe('estados de la tabla de categorías', () => {
 });
 
 describe('tabla de duraciones', () => {
-  const plazo = (clave: string, etiqueta: string): PlazoServicio => ({ clave, etiqueta, dias: null, derivadoDe: null, ticketsAbiertos: 0, actualizadoPor: null, actualizadoEn: null });
+  const plazo = (clave: string, etiqueta: string): PlazoServicio => ({ clave, etiqueta, dias: null, derivadoDe: null, ticketsAbiertos: 0, borrable: false, actualizadoPor: null, actualizadoEn: null });
   const PLAZOS = [plazo('diagnostico', 'Diagnóstico'), plazo('calibracion', 'Calibración')];
   const d = (etapa: DuracionAgendaConfig['etapa'], tipo: string, dias: number, por: string | null = null): DuracionAgendaConfig => ({ etapa, tipo, dias, actualizadoPor: por, actualizadoEn: por ? '2026-10-07 01:10:00+00' : null });
   const DURACIONES = [d('diagnostico', '*', 3), d('diagnostico', 'calibracion', 2, 'director@example.com'), d('proceso', '*', 4), d('proceso', 'tipo retirado', 9)];

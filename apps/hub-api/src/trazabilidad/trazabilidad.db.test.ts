@@ -42,6 +42,7 @@ const SQL_046 = readFileSync(fileURLToPath(new URL('../users/migrations/046_traz
 const SQL_047 = readFileSync(fileURLToPath(new URL('../users/migrations/047_trazabilidad_estados_historial.sql', import.meta.url)), 'utf8');
 const SQL_048 = readFileSync(fileURLToPath(new URL('../users/migrations/048_trazabilidad_contactos.sql', import.meta.url)), 'utf8');
 const SQL_049 = readFileSync(fileURLToPath(new URL('../users/migrations/049_trazabilidad_roles.sql', import.meta.url)), 'utf8');
+const SQL_051 = readFileSync(fileURLToPath(new URL('../users/migrations/051_trazabilidad_agenda_config.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
@@ -1447,6 +1448,7 @@ describe('tipo compuesto «Diagnóstico + Calibración»', () => {
         { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
       ],
       ticketsAbiertos: 0,
+      borrable: false,
       actualizadoPor: null,
       actualizadoEn: null,
     });
@@ -1546,12 +1548,23 @@ describe('plazos por tipo de servicio', () => {
       dias: null,
       derivadoDe: null,
       ticketsAbiertos: 2,
+      borrable: false,
       actualizadoPor: null,
       actualizadoEn: null,
     });
     expect(p.find((x) => x.clave === 'diagnostico')).toMatchObject({ etiqueta: 'Diagnóstico', dias: 3, ticketsAbiertos: 1 });
     expect(p.find((x) => x.clave === 'verificacion')).toBeUndefined();
     expect(p.find((x) => x.clave === '')).toBeUndefined();
+  });
+
+  it('borrable (2026-11-24): sólo un tipo con fila propia que no siembran las migraciones y que ningún ticket abierto usa', async () => {
+    await db.query(`INSERT INTO portal.tmc_plazos (clave, etiqueta, dias_habiles) VALUES ('reparacion', 'Reparación', 5), ('revision', 'Revisión', NULL)`);
+    await db.query(`INSERT INTO desk.tickets (number, status, status_type, tipo_servicio) VALUES (1, 'x', 'Open', 'Revisión'), (2, 'x', 'Open', 'Instalación'), (3, 'x', 'Closed', 'Reparación')`);
+    const p = await repo.listarPlazos(db);
+    // Ni los sembrados (aunque nadie los use), ni uno en uso, ni uno que sólo traen los tickets. Un ticket cerrado no cuenta.
+    expect(p.filter((x) => x.borrable).map((x) => x.clave)).toEqual(['reparacion']);
+    expect(p.find((x) => x.clave === 'revision')).toMatchObject({ ticketsAbiertos: 1, borrable: false });
+    expect(p.find((x) => x.clave === 'instalacion')).toMatchObject({ ticketsAbiertos: 1, borrable: false });
   });
 
   it('editar persiste, firma con el correo y conserva la etiqueta; vaciar deja «sin plazo»', async () => {
@@ -1589,6 +1602,103 @@ describe('plazos por tipo de servicio', () => {
   it('la tabla rechaza un plazo fuera de 1..365 aunque alguien se salte la validación', async () => {
     await expect(db.query(`UPDATE portal.tmc_plazos SET dias_habiles = 0 WHERE clave = 'diagnostico'`)).rejects.toThrow();
     await expect(db.query(`UPDATE portal.tmc_plazos SET dias_habiles = 366 WHERE clave = 'diagnostico'`)).rejects.toThrow();
+  });
+
+  // Tipos creados desde Configuración (diseño del 2026-11-24): crear uno nuevo y borrar uno creado en la app que ningún ticket
+  // abierto usa, con sus días en la agenda. Los sembrados por la 043 y la 045 no se borran (volverían con el siguiente arranque).
+  describe('tipos creados desde Configuración', () => {
+    const duraciones = async () => (await db.query(`SELECT etapa, tipo, dias_habiles FROM portal.tmc_agenda_duraciones ORDER BY etapa, tipo COLLATE "C"`)).rows;
+    const ticket = (numero: number, tipo: string | null) => db.query(`INSERT INTO desk.tickets (number, status, status_type, tipo_servicio) VALUES ($1, 'x', 'Open', $2)`, [numero, tipo]);
+
+    beforeEach(async () => {
+      // La agenda como recién migrada: sólo las «*» de la 051 (otros ficheros de BD dejan duraciones de tipos).
+      await db.query('TRUNCATE portal.tmc_agenda_duraciones');
+      await db.query(SQL_051);
+    });
+
+    it('crear: la fila nace firmada, con el nombre sin los espacios de los extremos, y sale borrable', async () => {
+      await repo.crearTipo(db, { tipo: ' Reparación ', dias: 5 }, actor);
+      const { rows } = await db.query(
+        `SELECT clave, etiqueta, dias_habiles, actualizado_por_id, actualizado_por, actualizado_en IS NOT NULL AS firmado FROM portal.tmc_plazos WHERE clave = 'reparacion'`,
+      );
+      expect(rows).toEqual([{ clave: 'reparacion', etiqueta: 'Reparación', dias_habiles: 5, actualizado_por_id: actor.userId, actualizado_por: actor.email, firmado: true }]);
+      expect(await plazo('reparacion')).toMatchObject({ etiqueta: 'Reparación', dias: 5, ticketsAbiertos: 0, borrable: true, actualizadoPor: actor.email });
+      await repo.crearTipo(db, { tipo: 'Revisión externa', dias: null }, actor);
+      expect(await plazo('revision externa')).toMatchObject({ dias: null, borrable: true });
+    });
+
+    it('crear uno que ya existe, con otra grafía (también un sembrado), es 409 tipo_existente y no toca ninguna fila', async () => {
+      await repo.crearTipo(db, { tipo: 'Reparación', dias: 5 }, actor);
+      const antes = (await db.query(`SELECT * FROM portal.tmc_plazos ORDER BY clave`)).rows;
+      for (const tipo of ['REPARACION', ' reparación ', 'Diagnostico']) {
+        await expect(repo.crearTipo(db, { tipo, dias: 9 }, actor)).rejects.toMatchObject({ status: 409, code: 'tipo_existente' });
+      }
+      expect((await db.query(`SELECT * FROM portal.tmc_plazos ORDER BY clave`)).rows).toEqual(antes);
+    });
+
+    it('crear vuelve a mirar el nombre aunque nadie haya pasado por parseTipoNuevo: un compuesto es 400 y no se escribe', async () => {
+      await db.query(`DELETE FROM portal.tmc_plazos WHERE clave = 'diagnostico + calibracion'`);
+      await expect(repo.crearTipo(db, { tipo: 'Diagnóstico + Calibración', dias: 7 }, actor)).rejects.toMatchObject({ status: 400, field: 'tipo' });
+      expect(await plazo('diagnostico + calibracion')).toBeUndefined();
+    });
+
+    it('un tipo que sólo traen los tickets abiertos se puede crear (nace su fila) y no es borrable mientras lo usen', async () => {
+      await ticket(1, 'Instalación');
+      await repo.crearTipo(db, { tipo: 'Instalación', dias: 10 }, actor);
+      expect(await plazo('instalacion')).toMatchObject({ dias: 10, ticketsAbiertos: 1, borrable: false, actualizadoPor: actor.email });
+    });
+
+    it('borrar un sembrado es 409 tipo_sembrado y no toca nada', async () => {
+      const antes = await repo.listarPlazos(db);
+      for (const clave of ['diagnostico', 'no aplica', 'diagnostico + calibracion']) {
+        await expect(repo.borrarTipo(db, clave)).rejects.toMatchObject({ status: 409, code: 'tipo_sembrado' });
+      }
+      expect(await repo.listarPlazos(db)).toEqual(antes);
+    });
+
+    it('borrar uno sin uso: se van su fila y sus días en la agenda; la «*» y los de otros tipos se quedan', async () => {
+      await repo.crearTipo(db, { tipo: 'Reparación', dias: 5 }, actor);
+      await db.query(
+        `INSERT INTO portal.tmc_agenda_duraciones (etapa, tipo, dias_habiles) VALUES ('diagnostico', 'reparacion', 2), ('proceso', 'reparacion', 6), ('proceso', 'mantenimiento', 3)`,
+      );
+      await repo.borrarTipo(db, 'reparacion');
+      expect(await plazo('reparacion')).toBeUndefined();
+      expect(await duraciones()).toEqual([
+        { etapa: 'diagnostico', tipo: '*', dias_habiles: 3 },
+        { etapa: 'proceso', tipo: '*', dias_habiles: 4 },
+        { etapa: 'proceso', tipo: 'mantenimiento', dias_habiles: 3 },
+        { etapa: 'verificacion', tipo: '*', dias_habiles: 1 },
+      ]);
+    });
+
+    it('borrar uno que usan tickets abiertos —con el tipo de Desk o puesto a mano— es 409 tipo_en_uso con el número, y no borra nada', async () => {
+      await repo.crearTipo(db, { tipo: 'Reparación', dias: 5 }, actor);
+      await db.query(`INSERT INTO portal.tmc_agenda_duraciones (etapa, tipo, dias_habiles) VALUES ('proceso', 'reparacion', 6)`);
+      await ticket(10, 'reparación');
+      await ticket(11, null);
+      await repo.fijarTipoServicio(db, 11, 'Reparación', actor);
+      await expect(repo.borrarTipo(db, 'reparacion')).rejects.toMatchObject({ status: 409, code: 'tipo_en_uso', messageEs: '«Reparación» no se puede borrar: lo usan 2 tickets abiertos.' });
+      expect(await plazo('reparacion')).toMatchObject({ dias: 5, ticketsAbiertos: 2 });
+      expect(await duraciones()).toContainEqual({ etapa: 'proceso', tipo: 'reparacion', dias_habiles: 6 });
+    });
+
+    it('cerrado el ticket, se borra; el tipo puesto a mano en un ticket cerrado conserva su etiqueta', async () => {
+      await repo.crearTipo(db, { tipo: 'Reparación', dias: 5 }, actor);
+      await ticket(12, null);
+      await repo.fijarTipoServicio(db, 12, 'Reparación', actor);
+      await db.query(`UPDATE desk.tickets SET status_type = 'Closed' WHERE number = 12`);
+      expect(await plazo('reparacion')).toMatchObject({ ticketsAbiertos: 0, borrable: true });
+      await repo.borrarTipo(db, 'reparacion');
+      expect((await db.query(`SELECT numero, clave, etiqueta FROM portal.tmc_servicios_tipo`)).rows).toEqual([{ numero: 12, clave: 'reparacion', etiqueta: 'Reparación' }]);
+    });
+
+    it('borrar uno sin fila —que no existe, que sólo traen los tickets, o la «*»— es 404 tipo_no_encontrado', async () => {
+      await ticket(13, 'Instalación');
+      for (const clave of ['reparacion', 'instalacion', '*']) {
+        await expect(repo.borrarTipo(db, clave)).rejects.toMatchObject({ status: 404, code: 'tipo_no_encontrado' });
+      }
+      expect(await duraciones()).toHaveLength(3);
+    });
   });
 });
 

@@ -15,11 +15,13 @@ import {
   PLAZO_MIN_DIAS,
   PUESTOS_MAX,
   TIPO_POR_DEFECTO,
+  TIPO_SERVICIO_MAX,
   categoriaCoherente,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
   comoTramoAviso,
+  errorNombreTipo,
   esCategoriaAgenda,
   esEmail,
   esEtapaAgenda,
@@ -396,6 +398,12 @@ export interface PlazoServicio {
   derivadoDe: PartePlazo[] | null;
   /** Tickets abiertos en Desk con este tipo. */
   ticketsAbiertos: number;
+  /**
+   * True si se puede borrar desde Configuración (2026-11-24, `tipoBorrable`, dominio.ts): creado en la app (no lo siembran la 043 ni
+   * la 045), con fila propia en tmc_plazos y sin ningún ticket abierto. La pantalla enseña «Borrar» con él; el servidor lo vuelve a
+   * comprobar al borrar.
+   */
+  borrable: boolean;
   /** Quién lo cambió por última vez; null si sigue como se sembró. */
   actualizadoPor: string | null;
   actualizadoEn: string | null;
@@ -423,12 +431,37 @@ export function parsePlazo(body: unknown): CambioPlazo {
   const tipo = texto(b.tipo, 'tipo', 80, true)!;
   if (!claveTipoServicio(tipo)) throw invalido('Falta «tipo».', 'tipo');
   if (partesDeTipo(claveTipoServicio(tipo))) throw errorPlazoDerivado(tipo);
-  const d = b.dias;
-  if (d === null || d === undefined || d === '') return { tipo, dias: null };
+  return { tipo, dias: diasDePlazo(b.dias) };
+}
+
+/** Los días de un plazo en un cuerpo: vacío (null o '') = sin plazo; si no, un entero de PLAZO_MIN_DIAS a PLAZO_MAX_DIAS (400 en «dias»). */
+function diasDePlazo(d: unknown): number | null {
+  if (d === null || d === undefined || d === '') return null;
   if (typeof d !== 'number' || !Number.isInteger(d) || d < PLAZO_MIN_DIAS || d > PLAZO_MAX_DIAS) {
     throw invalido(`El plazo debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o quedar vacío.`, 'dias');
   }
-  return { tipo, dias: d };
+  return d;
+}
+
+/**
+ * Valida el cuerpo de POST /trazabilidad/plazos (crear un tipo de servicio,
+ * 2026-11-24): `tipo`, el nombre, con la regla de `errorNombreTipo` (dominio.ts,
+ * la misma que aplica la pantalla), y `dias`, como en `parsePlazo`. Devuelve el
+ * nombre sin los espacios de los extremos.
+ */
+export function parseTipoNuevo(body: unknown): CambioPlazo {
+  const b = obj(body, 'body');
+  if (b.tipo !== null && b.tipo !== undefined && typeof b.tipo !== 'string') throw invalido('«tipo» debe ser texto.', 'tipo');
+  const tipo = typeof b.tipo === 'string' ? b.tipo.trim() : '';
+  const error = errorNombreTipo(tipo);
+  if (error) throw invalido(error, 'tipo');
+  return { tipo, dias: diasDePlazo(b.dias) };
+}
+
+/** La clave de DELETE /trazabilidad/plazos/:clave: la de un tipo de servicio, ya normalizada («reparacion», no «Reparación»). */
+export function parseClaveTipo(v: unknown): string {
+  if (typeof v !== 'string' || v === '' || v.length > TIPO_SERVICIO_MAX || v !== claveTipoServicio(v)) throw invalido('«clave» no es la clave de un tipo de servicio.', 'clave');
+  return v;
 }
 
 /** Un estado de Zoho Desk y su rol en el reloj del plazo (bloque «Estados de Desk» de «Configuración»). */

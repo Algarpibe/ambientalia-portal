@@ -248,6 +248,7 @@ describe('Configuración: plazo de un tipo compuesto (sólo lectura)', () => {
       { clave: 'calibracion', etiqueta: 'Calibración', dias: cal },
     ],
     ticketsAbiertos: 0,
+    borrable: false,
     actualizadoPor: null,
     actualizadoEn: null,
   });
