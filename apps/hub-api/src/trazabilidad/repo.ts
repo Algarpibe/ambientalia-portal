@@ -566,17 +566,17 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
  * cada grupo, por orden alfabético.
  */
 export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
-  const [guardados, enTickets] = await Promise.all([
-    db.query(`SELECT clave, etiqueta, dias_habiles, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_plazos`),
-    db.query(
-      `SELECT m.clave AS manual_clave, trim(t.tipo_servicio) AS tipo, count(*)::int AS n
-         FROM desk.tickets t
-         LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
-        WHERE ${TICKET_ABIERTO} AND (m.clave IS NOT NULL OR trim(t.tipo_servicio) <> '')
-        GROUP BY 1, 2
-        ORDER BY min(t.number)`,
-    ),
-  ]);
+  // Una consulta detrás de otra, no en paralelo: `borrarTipo` la llama con el cliente de su transacción, y dos consultas a la
+  // vez en un mismo cliente es lo que pg declara obsoleto (fallará con pg@9).
+  const guardados = await db.query(`SELECT clave, etiqueta, dias_habiles, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_plazos`);
+  const enTickets = await db.query(
+    `SELECT m.clave AS manual_clave, trim(t.tipo_servicio) AS tipo, count(*)::int AS n
+       FROM desk.tickets t
+       LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
+      WHERE ${TICKET_ABIERTO} AND (m.clave IS NOT NULL OR trim(t.tipo_servicio) <> '')
+      GROUP BY 1, 2
+      ORDER BY min(t.number)`,
+  );
   const plazos = resolverPlazos(guardados.rows as Row[]);
   // `borrable` se decide al final, con los recuentos ya hechos.
   const m = new Map<string, Omit<PlazoServicio, 'borrable'>>();
