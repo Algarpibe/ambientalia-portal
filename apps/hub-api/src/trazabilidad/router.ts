@@ -58,6 +58,8 @@ import {
   parseRolApp,
   parseSeguimiento,
   parseTipoManual,
+  parseTipoNuevo,
+  parseClaveTipo,
   parseUserId,
   type Actor,
   type MiRol,
@@ -562,6 +564,28 @@ export function createTrazabilidadRouter(
     ...gated,
     escritura('config.write', 'tmc_plazo', async (req) => {
       await repo.guardarPlazo(db, parsePlazo(req.body), actorOf(req));
+      return { plazos: await repo.listarPlazos(db) };
+    }),
+  );
+
+  // Crea un tipo de servicio (2026-11-24): {tipo, dias}, el nombre con la regla de `errorNombreTipo` y dias vacío = sin plazo.
+  // 200 con la lista entera ya actualizada, como el resto de escrituras de trazabilidad; 409 `tipo_existente` si ya hay uno con su clave normalizada.
+  router.post(
+    '/trazabilidad/plazos',
+    ...gated,
+    escritura('config.write', 'tmc_plazo_crear', async (req) => {
+      await repo.crearTipo(db, parseTipoNuevo(req.body), actorOf(req));
+      return { plazos: await repo.listarPlazos(db) };
+    }),
+  );
+
+  // Borra un tipo creado en la app que ningún ticket abierto usa, con sus días en la agenda (2026-11-24). Devuelve la lista
+  // entera ya actualizada. 400 en `clave` si no es la normalizada; 409 `tipo_sembrado`; 404 `tipo_no_encontrado`; 409 `tipo_en_uso`.
+  router.delete(
+    '/trazabilidad/plazos/:clave',
+    ...gated,
+    escritura('config.write', 'tmc_plazo_borrar', async (req) => {
+      await repo.borrarTipo(db, parseClaveTipo(req.params.clave));
       return { plazos: await repo.listarPlazos(db) };
     }),
   );

@@ -175,6 +175,16 @@ function app() {
   return a;
 }
 
+/**
+ * La app para crear y borrar tipos de servicio (2026-11-24): la inserción de un tipo nuevo añade su fila (sin esto el doble
+ * contesta 0 filas, que es «ya existe»), y da conexiones al doble (borrar va en una transacción).
+ */
+function appPlazos() {
+  conexiones.cliente = true;
+  respuestas.push([/INSERT INTO portal\.tmc_plazos/, 1]);
+  return app();
+}
+
 let seq = 0;
 /**
  * Un usuario nuevo y su token. Por defecto tiene la app y es Director Técnico,
@@ -245,6 +255,9 @@ describe('permisos por rol', () => {
     { ruta: 'POST /trazabilidad/avisos/envios/:id/resolver', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios/7/resolver').set(c).send({ salio: false }) },
     { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
     { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
+    // Tipos de servicio creables desde Configuración (2026-11-24): crear uno y borrar uno creado en la app, con el permiso de los plazos.
+    { ruta: 'POST /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(appPlazos()).post('/api/trazabilidad/plazos').set(c).send({ tipo: 'Reparación', dias: 5 }) },
+    { ruta: 'DELETE /trazabilidad/plazos/:clave', permiso: 'config.write', pedir: (c) => request(appPlazos()).delete('/api/trazabilidad/plazos/reparacion').set(c) },
     { ruta: 'PUT /trazabilidad/estados', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/estados').set(c).send({ estado: 'Servicio externo', rol: 'standby' }) },
     // La agenda del taller (lote 5): sus cuatro escrituras y las tres de su configuración.
     { ruta: 'POST /trazabilidad/agenda/reparto', permiso: 'agenda.reparto', pedir: (c) => request(appAgenda()).post('/api/trazabilidad/agenda/reparto').set(c).send({ reparto: [{ numero: 984, etapa: 'proceso', puesto: 1 }] }) },
@@ -286,7 +299,7 @@ describe('permisos por rol', () => {
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones', 'POST /trazabilidad/avisos'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las veintiséis escrituras del router (la 24.ª, del lote 11: la vigencia de una marca; la 25.ª, del lote 12: la frecuencia de preventivo de un cliente, sólo administradores; y, en lugar de marcar en bloque, enviar y resolver un aviso), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las tres retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veintiocho escrituras del router (la 24.ª, del lote 11: la vigencia de una marca; la 25.ª, del lote 12: la frecuencia de preventivo de un cliente, sólo administradores; la 27.ª y la 28.ª, del 2026-11-24: crear y borrar un tipo de servicio; y, en lugar de marcar en bloque, enviar y resolver un aviso), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las tres retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -355,6 +368,8 @@ describe('permisos por rol', () => {
   it('el permiso va antes que la validación: un cuerpo no válido de un LECTOR es 403, no 400', async () => {
     const c = conRol(null);
     expect((await request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: '', dias: 'tres' })).status).toBe(403);
+    expect((await request(app()).post('/api/trazabilidad/plazos').set(c).send({ tipo: '*', dias: 'tres' })).status).toBe(403);
+    expect((await request(app()).delete('/api/trazabilidad/plazos/Reparaci%C3%B3n').set(c)).status).toBe(403);
     expect((await request(app()).put('/api/trazabilidad/seguimiento/a%20b').set(c).send({})).status).toBe(403);
     expect((await request(app()).put('/api/trazabilidad/servicios/abc/tipo').set(c).send({})).status).toBe(403);
     expect((await request(app()).put('/api/trazabilidad/contactos?hoy=ayer').set(c).send([])).status).toBe(403);
@@ -593,6 +608,66 @@ describe('servicios y plazos', () => {
       expect(res.body).toEqual({ plazos: [] });
     }
     expect(queries.some((q) => /INSERT INTO portal\.tmc_plazos/.test(q))).toBe(true);
+  });
+
+  // Tipos de servicio creables desde Configuración (2026-11-24): crear con POST y borrar con DELETE. Lo de la base, en trazabilidad.db.test.ts.
+  it.each<[object, string]>([
+    [{ tipo: '' }, 'tipo'],
+    [{ tipo: '*', dias: 3 }, 'tipo'],
+    [{ tipo: 'x'.repeat(81) }, 'tipo'],
+    [{ tipo: 'Diagnóstico + Calibración' }, 'tipo'],
+    [{ tipo: 7 }, 'tipo'],
+    [{ tipo: 'Reparación', dias: 0 }, 'dias'],
+    [{ tipo: 'Reparación', dias: '5' }, 'dias'],
+  ])('crear un tipo con %j → 400 en «%s» y ninguna consulta', async (cuerpo, campo) => {
+    const res = await request(app()).post('/api/trazabilidad/plazos').set(auth()).send(cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect(queries).toEqual([]);
+  });
+
+  it('crear un tipo nuevo → 200 con la lista ya actualizada, con una inserción que no pisa ninguna fila', async () => {
+    respuestas.push([/INSERT INTO portal\.tmc_plazos/, 1]);
+    const res = await request(app()).post('/api/trazabilidad/plazos').set(auth()).send({ tipo: ' Reparación ', dias: 5 });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ plazos: [] });
+    expect(queries.find((q) => /INSERT INTO portal\.tmc_plazos/.test(q))).toMatch(/ON CONFLICT \(clave\) DO NOTHING/);
+  });
+
+  it('crear un tipo que ya existe (la inserción no añade ninguna fila) → 409 tipo_existente', async () => {
+    const res = await request(app()).post('/api/trazabilidad/plazos').set(auth()).send({ tipo: 'diagnostico', dias: 3 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('tipo_existente');
+  });
+
+  it('borrar: un sembrado → 409 tipo_sembrado y una clave sin normalizar → 400, sin consultar nada; uno sin fila → 404', async () => {
+    const borrar = (clave: string) => request(app()).delete(`/api/trazabilidad/plazos/${clave}`).set(auth());
+    for (const clave of ['diagnostico', 'no%20aplica', 'diagnostico%20%2B%20calibracion']) {
+      const res = await borrar(clave);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('tipo_sembrado');
+    }
+    for (const clave of ['Reparaci%C3%B3n', '%20reparacion']) {
+      const res = await borrar(clave);
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('clave');
+    }
+    expect(queries).toEqual([]);
+    expect(conexiones.n).toBe(0);
+    conexiones.cliente = true;
+    const res = await borrar('reparacion');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('tipo_no_encontrado');
+    expect(queries.some((q) => /DELETE/.test(q))).toBe(false);
+  });
+
+  it('borrar uno creado en la app y sin uso → 200 con la lista ya actualizada', async () => {
+    conexiones.cliente = true;
+    respuestas.push([/FOR UPDATE/, [{ etiqueta: 'Reparación' }]]);
+    const res = await request(app()).delete('/api/trazabilidad/plazos/reparacion').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ plazos: [] });
+    expect(queries.filter((q) => /^DELETE/.test(q.trim()))).toEqual([expect.stringMatching(/tmc_agenda_duraciones/), expect.stringMatching(/tmc_plazos/)]);
   });
 
   it('servicios: la respuesta trae también los tipos que se pueden elegir a mano', async () => {
