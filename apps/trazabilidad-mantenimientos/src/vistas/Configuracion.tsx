@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Inventario } from '../api';
 import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type MarcaSeguimiento, type PlazoServicio, type RolEstado } from '../dominio';
 import { estadosReloj, firma } from '../lib/agenda';
+import { avisoBorrado, avisoCreado, leerDias, leerTipoNuevo, preguntaBorrar } from '../lib/tiposServicio';
 import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
@@ -64,7 +65,7 @@ export default function Configuracion({
           La cambia el Director Técnico. {motivo}
         </Alert>
       )}
-      <Plazos notificar={notificar} />
+      <Plazos notificar={notificar} onTipos={agenda.recargar} />
       <PuestosAgenda agenda={agenda} />
       <DuracionesAgenda agenda={agenda} />
       <div>
@@ -229,13 +230,24 @@ function EstadosDesk({ notificar }: Props) {
   );
 }
 
-/** Los plazos, en días hábiles, de cada tipo de servicio. */
-function Plazos({ notificar }: Props) {
+/**
+ * Los plazos, en días hábiles, de cada tipo de servicio. Desde el 2026-11-24 también se CREAN tipos aquí (la última fila) y se
+ * borran los creados en la app que ningún ticket abierto usa (`borrable`), con la pregunta en la propia fila. `onTipos` avisa de
+ * que los tipos cambiaron: la tabla de duraciones de la agenda saca de ellos sus columnas.
+ */
+function Plazos({ notificar, onTipos }: Props & { onTipos: () => Promise<void> }) {
   const [plazos, setPlazos] = useState<PlazoServicio[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Lo que hay escrito en cada casilla que se ha tocado, por clave. */
   const [borrador, setBorrador] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState<string | null>(null);
+  /** Lo escrito en la fila de crear un tipo. */
+  const [nuevo, setNuevo] = useState({ nombre: '', dias: '' });
+  const [creando, setCreando] = useState(false);
+  /** La clave del tipo cuya fila pregunta «¿Borrar …?»; null = ninguna. */
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  /** El error del servidor al crear (clave null: la fila de crear) o al borrar (la clave de su fila): se enseña en esa fila. */
+  const [errorFila, setErrorFila] = useState<{ clave: string | null; mensaje: string } | null>(null);
   const editable = usePermisos().puede('config.write');
 
   const cargar = useCallback(async () => {
@@ -254,17 +266,45 @@ function Plazos({ notificar }: Props) {
   if (!plazos) return error ? <Alert tone="red">{error}</Alert> : <Loading texto="Cargando los plazos…" />;
 
   const escrito = (p: PlazoServicio) => borrador[p.clave] ?? (p.dias === null ? '' : String(p.dias));
-  /** El valor a guardar, o un mensaje si lo escrito no vale. La misma regla que valida el servidor. */
-  const leer = (txt: string): { dias: number | null } | { error: string } => {
-    const t = txt.trim();
-    if (t === '') return { dias: null };
-    const n = Number(t);
-    if (!/^\d+$/.test(t) || n < PLAZO_MIN_DIAS || n > PLAZO_MAX_DIAS) return { error: `Un número entero entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o vacío.` };
-    return { dias: n };
+  /** La fila de crear: lo que se mandaría y el error de cada casilla (la misma regla que valida el servidor). */
+  const lectura = leerTipoNuevo(nuevo.nombre, nuevo.dias);
+
+  const crear = async () => {
+    if (!lectura.nuevo) return;
+    const { tipo, dias } = lectura.nuevo;
+    setCreando(true);
+    try {
+      setPlazos((await api.crearTipo(tipo, dias)).plazos);
+      setNuevo({ nombre: '', dias: '' });
+      setErrorFila(null);
+      notificar(avisoCreado(tipo));
+      void onTipos();
+    } catch (e) {
+      setErrorFila({ clave: null, mensaje: (e as Error).message });
+    } finally {
+      setCreando(false);
+    }
+  };
+
+  const borrar = async (p: PlazoServicio) => {
+    setGuardando(p.clave);
+    try {
+      setPlazos((await api.borrarTipo(p.clave)).plazos);
+      setErrorFila(null);
+      notificar(avisoBorrado(p.etiqueta));
+      void onTipos();
+    } catch (e) {
+      setErrorFila({ clave: p.clave, mensaje: (e as Error).message });
+      // Puede que ya lo use un ticket, o que otra persona lo haya borrado: la lista de ahora dice si sigue habiendo «Borrar».
+      void cargar();
+    } finally {
+      setGuardando(null);
+      setConfirmando(null);
+    }
   };
 
   const guardar = async (p: PlazoServicio) => {
-    const v = leer(escrito(p));
+    const v = leerDias(escrito(p));
     if ('error' in v) return;
     setGuardando(p.clave);
     try {
@@ -322,13 +362,39 @@ function Plazos({ notificar }: Props) {
                   </tr>
                 );
               }
+              // «¿Borrar …?» en la propia fila, sin diálogo del navegador.
+              if (confirmando === p.clave) {
+                return (
+                  <tr key={p.clave} className="bg-amber-50">
+                    <td className="px-3 py-2 font-medium text-gray-900">{p.etiqueta}</td>
+                    <td colSpan={4} className="px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <p className="mr-auto text-sm text-gray-800">{preguntaBorrar(p.etiqueta)}</p>
+                        <Button variant="primary" busy={guardando === p.clave} onClick={() => void borrar(p)}>
+                          Sí, borrar
+                        </Button>
+                        <Button variant="ghost" disabled={guardando === p.clave} onClick={() => setConfirmando(null)}>
+                          Cancelar
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
               const txt = escrito(p);
-              const v = leer(txt);
+              const v = leerDias(txt);
               const mal = 'error' in v;
               const cambiado = !mal && v.dias !== p.dias;
               return (
                 <tr key={p.clave}>
-                  <td className="px-3 py-2 font-medium text-gray-900">{p.etiqueta}</td>
+                  <td className="px-3 py-2 font-medium text-gray-900">
+                    {p.etiqueta}
+                    {errorFila && errorFila.clave === p.clave && (
+                      <p role="alert" className="mt-1 text-xs font-normal text-red-600">
+                        {errorFila.mensaje}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <input
                       type="number"
@@ -361,19 +427,91 @@ function Plazos({ notificar }: Props) {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {editable && (
-                      <Button variant="primary" disabled={!cambiado} busy={guardando === p.clave} onClick={() => void guardar(p)}>
-                        Guardar
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="primary" disabled={!cambiado} busy={guardando === p.clave} onClick={() => void guardar(p)}>
+                          Guardar
+                        </Button>
+                        {/* Sólo los creados en la app que ningún ticket abierto usa (el servidor lo vuelve a comprobar al borrar). */}
+                        {p.borrable && (
+                          <Button
+                            disabled={guardando === p.clave}
+                            onClick={() => {
+                              setConfirmando(p.clave);
+                              setErrorFila(null);
+                            }}
+                          >
+                            Borrar
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
               );
             })}
+            {/* Crear un tipo nuevo (2026-11-24): la última fila, sólo con `config.write`. */}
+            {editable && (
+              <tr className="bg-gray-50">
+                <td className="px-3 py-2">
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={nuevo.nombre}
+                    disabled={creando}
+                    onChange={(e) => {
+                      setNuevo((n) => ({ ...n, nombre: e.target.value }));
+                      setErrorFila(null);
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && void crear()}
+                    placeholder="Tipo nuevo, p. ej. Reparación"
+                    aria-label="Nombre del tipo de servicio nuevo"
+                    aria-invalid={lectura.errorNombre !== null}
+                    className={`block min-h-[44px] w-full min-w-[12rem] rounded-xl border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 ${DESACTIVADO} ${
+                      lectura.errorNombre ? 'border-red-400 focus:ring-red-100' : 'border-gray-300 focus:border-blue-400 focus:ring-blue-100'
+                    }`}
+                  />
+                  {lectura.errorNombre && <p className="mt-1 text-xs text-red-600">{lectura.errorNombre}</p>}
+                  {errorFila && errorFila.clave === null && (
+                    <p role="alert" className="mt-1 text-xs text-red-600">
+                      {errorFila.mensaje}
+                    </p>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={PLAZO_MIN_DIAS}
+                    max={PLAZO_MAX_DIAS}
+                    step={1}
+                    value={nuevo.dias}
+                    disabled={creando}
+                    onChange={(e) => setNuevo((n) => ({ ...n, dias: e.target.value }))}
+                    onKeyDown={(e) => e.key === 'Enter' && void crear()}
+                    placeholder="sin plazo"
+                    aria-label="Plazo del tipo nuevo en días hábiles"
+                    aria-invalid={lectura.errorDias !== null}
+                    className={`block min-h-[44px] w-32 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 ${DESACTIVADO} ${
+                      lectura.errorDias ? 'border-red-400 focus:ring-red-100' : 'border-gray-300 focus:border-blue-400 focus:ring-blue-100'
+                    }`}
+                  />
+                  {lectura.errorDias && <p className="mt-1 text-xs text-red-600">{lectura.errorDias}</p>}
+                </td>
+                <td className="px-3 py-2" />
+                <td className="px-3 py-2 text-xs text-gray-400">tipo nuevo</td>
+                <td className="px-3 py-2 text-right">
+                  <Button variant="primary" disabled={!lectura.nuevo} busy={creando} onClick={() => void crear()}>
+                    Crear
+                  </Button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <p className="mt-3 text-xs text-gray-500">
-        Los tipos salen de Zoho Desk: si un ticket abierto trae uno nuevo, aparece aquí sin plazo para que se lo pongas. Los plazos no se suman entre sí: un equipo en
+        Los tipos salen de Zoho Desk: si un ticket abierto trae uno nuevo, aparece aquí sin plazo para que se lo pongas. También se pueden crear aquí, en la última
+        fila, para ponérselos a mano a un ticket en «Servicios»; sólo se borran los creados aquí que ningún ticket abierto usa. Los plazos no se suman entre sí: un equipo en
         calibración tiene el plazo de «Calibración», no el de diagnóstico más el de calibración. La excepción es el tipo «Diagnóstico + Calibración», para el equipo que
         pasa por las dos cosas: su plazo es la suma de los otros dos, se recalcula solo cuando cambias cualquiera de ellos y por eso no se edita aquí.
       </p>
