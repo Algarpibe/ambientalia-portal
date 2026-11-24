@@ -280,6 +280,50 @@ export function tipoEfectivo(manual: unknown, desk: unknown): { tipo: string; or
   return d ? { tipo: d, origen: 'desk' } : { tipo: '', origen: null };
 }
 
+// ── Tipo de servicio sugerido por el vencimiento de la calibración ───────────
+//
+// Diseño del 2026-11-24. Un ticket que llega SIN tipo y cuyo equipo entró con
+// la calibración vencida o a punto de vencer lleva una SUGERENCIA,
+// «Diagnóstico + Calibración». La app nunca la aplica sola (el tipo decide el
+// plazo y la agenda): una persona la confirma con «Usar», que pone el tipo a
+// mano por la ruta de siempre.
+
+/** El tipo que se sugiere: el compuesto de `TIPOS_COMPUESTOS` (su fila de `tmc_plazos` la siembra la 045). */
+export const CLAVE_TIPO_SUGERIDO = 'diagnostico + calibracion';
+
+/** Se sugiere si, el día de entrada, a la calibración le quedaban estos días o menos; las vencidas (negativos), siempre. */
+export const UMBRAL_SUGERENCIA_DIAS = 60;
+
+/** La sugerencia de un ticket: el tipo (clave y etiqueta de Configuración) y el día en que vence, o vencía, su calibración. */
+export interface TipoSugerido {
+  clave: string;
+  etiqueta: string;
+  /** AAAA-MM-DD: la calibración que contaba el día de entrada más la vigencia de su equipo. */
+  vence: string;
+}
+
+/**
+ * El tipo que se sugiere a un ticket, o null. Sólo si no tiene tipo (`tipo` es
+ * el efectivo, `tipoEfectivo`), tiene día de entrada, existe `sugerible` (la
+ * fila de `CLAVE_TIPO_SUGERIDO` en Configuración) y, ese día, la calibración
+ * que contaba (`ultimaCalibracion`) con la vigencia de su equipo (`vigencia`;
+ * null = sin vencimiento) estaba vencida o a `UMBRAL_SUGERENCIA_DIAS` o menos
+ * de vencer. La referencia es el ingreso, no hoy: calibrar el equipo durante
+ * el servicio no borra la sugerencia.
+ */
+export function tipoSugerido(e: {
+  tipo: string;
+  ultimaCalibracion: string | null;
+  vigencia: number | null;
+  ingreso: string | null;
+  sugerible: { clave: string; etiqueta: string } | null;
+}): TipoSugerido | null {
+  if (e.tipo.trim() !== '' || !e.sugerible || !esFechaIso(e.ingreso)) return null;
+  const { vence, vigenciaDias } = estadoCalibracion(e.ultimaCalibracion, e.ingreso, e.vigencia);
+  if (vence === null || vigenciaDias === null || vigenciaDias > UMBRAL_SUGERENCIA_DIAS) return null;
+  return { clave: e.sugerible.clave, etiqueta: e.sugerible.etiqueta, vence };
+}
+
 /**
  * Modelo del equipo: el tercer tramo del código de servicio
  * («MT_18A00001_EDM180C_261002» → «EDM180C»). La réplica no lo trae en columna.
