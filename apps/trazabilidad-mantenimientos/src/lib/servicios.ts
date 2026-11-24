@@ -12,6 +12,7 @@ import {
   ETIQUETA_ROL,
   RETROCESO_MAX_DIAS,
   ROLES_ESTADO,
+  UMBRAL_SUGERENCIA_DIAS,
   claveTipoServicio,
   diasEntre,
   sumarDias,
@@ -325,6 +326,22 @@ export function notaTipo(s: ServicioVista): string {
     return `Puesto a mano por ${s.tipoManual.por} el ${fmtFecha(s.tipoManual.en)}.${desk}`;
   }
   return s.tipoDesk ? 'Tipo de servicio según Zoho Desk.' : 'Zoho Desk no envía el tipo de servicio de este ticket: elígelo aquí.';
+}
+
+/** El `title` de la etiqueta del tipo sugerido: por qué sale y que no cambia nada sola. */
+export const TITULO_SUGERENCIA = `Su equipo entró con la calibración vencida o a ${UMBRAL_SUGERENCIA_DIAS} días o menos de vencer. Es sólo una sugerencia: el tipo no cambia hasta que alguien pulsa «Usar» o lo elige en el desplegable.`;
+
+/**
+ * La etiqueta ámbar del tipo sugerido, junto al desplegable: «Sugerido:
+ * Diagnóstico + Calibración — vencía el 12/03/2026»; «vence el» si la
+ * calibración vencía después del día de entrada del ticket. Null si no hay
+ * sugerencia (también con un hub-api que todavía no la manda).
+ */
+export function textoSugerencia(s: Pick<ServicioVista, 'tipoSugerido' | 'ingreso'>): string | null {
+  const t = s.tipoSugerido;
+  if (!t) return null;
+  const verbo = s.ingreso !== null && t.vence > s.ingreso ? 'vence' : 'vencía';
+  return `Sugerido: ${t.etiqueta} — ${verbo} el ${fmtFecha(t.vence)}`;
 }
 
 /** Eje de tiempo del calendario: una columna por día, de `inicio` a `fin` (ambos incluidos). */

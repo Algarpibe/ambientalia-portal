@@ -64,6 +64,15 @@ export function fechaEfectiva(filas: readonly FilaCalibracion[], respaldo: strin
   return filas.length === 0 ? respaldo : (calibracionQueCuenta(filas, hoy)?.fecha ?? null);
 }
 
+/**
+ * La calibración que contaba el día en que entró un ticket (`ingreso`), para el tipo sugerido de «Servicios» (2026-11-24): la de
+ * `fechaEfectiva` a ese día, y el respaldo del inventario sólo si no es posterior. Calibrar el equipo durante el servicio no la cambia.
+ */
+export function calibracionAlIngreso(filas: readonly FilaCalibracion[], respaldo: string | null, ingreso: string): string | null {
+  const fecha = fechaEfectiva(filas, respaldo, ingreso);
+  return fecha !== null && fecha <= ingreso ? fecha : null;
+}
+
 /** Una fila que la pasada insertaría, y una que anularía. */
 export interface FilaNueva { clave: string | null; serial: string; serialNorm: string; deskEquipoId: string | null; fecha: string; origen: 'fst022' | 'desk'; ticket: number | null; estado: 'vigente' | 'en_revision'; motivo: string | null }
 export interface Anulacion { id: number; motivo: string }

@@ -5,6 +5,7 @@ import { type EstadoPlazo, type OrigenCliente, type ServicioVista, type TipoServ
 import {
   GRUPOS_PLAZO,
   TITULO_STANDBY,
+  TITULO_SUGERENCIA,
   TONO_PLAZO,
   alternarGrupo,
   avisoSinTipo,
@@ -27,6 +28,7 @@ import {
   selectorTipo,
   textoCliente,
   textoPlazo,
+  textoSugerencia,
   textoTramos,
   tituloFechaLimite,
   tituloGrupo,
@@ -304,7 +306,7 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-[13px]">{s.serial || <Vacio />}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.modelo || <Vacio />}</td>
                   <td className="whitespace-nowrap px-3 py-1.5">
-                    <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando || !puedeTipo} onCambio={cambiarTipo} />
+                    <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando || !puedeTipo} puede={puedeTipo} onCambio={cambiarTipo} />
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">
                     {s.estado} <RolTag s={s} />
@@ -387,18 +389,23 @@ function TipoSelect({
   tipos,
   guardando,
   bloqueado,
+  puede,
   onCambio,
 }: {
   s: ServicioVista;
   tipos: readonly TipoServicioOpcion[];
   guardando: boolean;
   bloqueado: boolean;
+  /** Tiene `servicios.tipo.write`. Sin él se ve la sugerencia, pero no «Usar» (`bloqueado` también vale mientras se guarda otro ticket). */
+  puede: boolean;
   onCambio: (s: ServicioVista, clave: string, etiqueta: string) => void | Promise<void>;
 }) {
   const { valor, opciones } = selectorTipo(s, tipos);
   const sinTipo = !s.tipoServicio;
+  const sugerido = s.tipoSugerido;
+  const sugerencia = textoSugerencia(s);
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-1.5">
       <select
         value={valor}
         disabled={bloqueado}
@@ -422,6 +429,29 @@ function TipoSelect({
           </option>
         ))}
       </select>
+      {sugerido && sugerencia && (
+        <span className="inline-flex items-center gap-1">
+          <span title={TITULO_SUGERENCIA}>
+            <Tag tone="amber">{sugerencia}</Tag>
+          </span>
+          {puede && (
+            <button
+              type="button"
+              disabled={bloqueado}
+              aria-label={`Usar ${sugerido.etiqueta} como tipo de servicio del ticket ${s.numero}`}
+              title={TITULO_SUGERENCIA}
+              // Como el desplegable: si la fila gana una acción propia, el botón no debe dispararla.
+              onClick={(e) => {
+                e.stopPropagation();
+                void onCambio(s, sugerido.clave, sugerido.etiqueta);
+              }}
+              className={`min-h-[36px] rounded-xl border border-amber-300 bg-white px-3 py-1 text-sm font-medium text-amber-800 hover:bg-amber-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${DESACTIVADO}`}
+            >
+              Usar
+            </button>
+          )}
+        </span>
+      )}
       {guardando ? (
         <span className="text-[11px] text-gray-500" role="status">
           guardando…

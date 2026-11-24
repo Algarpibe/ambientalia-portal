@@ -4,6 +4,7 @@ import {
   GRUPOS_PLAZO,
   OPCIONES_ROL,
   TITULO_STANDBY,
+  TITULO_SUGERENCIA,
   TONO_PLAZO,
   alternarGrupo,
   avisoRol,
@@ -30,6 +31,7 @@ import {
   resumenServicios,
   textoCliente,
   textoPlazo,
+  textoSugerencia,
   textoTramos,
   tituloFechaLimite,
   tituloGrupo,
@@ -70,6 +72,7 @@ function sv(ingreso: string | null, fechaLimite: string | null, extra: Partial<S
     tipoOrigen: fechaLimite ? 'desk' : null,
     tipoDesk: fechaLimite ? 'Diagnóstico' : '',
     tipoManual: null,
+    tipoSugerido: null,
     ...extra,
   };
 }
@@ -756,5 +759,27 @@ describe('textoCliente: el contacto no pasa por empresa', () => {
   it('el asunto va apagado, sin prefijo; sin nada, vacío', () => {
     expect(textoCliente(sv(null, null, { cliente: 'Servicio Técnico', clienteOrigen: 'asunto', clienteDeAsunto: true }))).toEqual({ texto: 'Servicio Técnico', apagado: true });
     expect(textoCliente(sv(null, null, { cliente: '', clienteOrigen: 'asunto', clienteDeAsunto: true }))).toEqual({ texto: '', apagado: true });
+  });
+});
+
+describe('tipo sugerido junto al desplegable', () => {
+  const sugerido = (vence: string): Partial<ServicioVista> => ({ tipoSugerido: { clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', vence } });
+
+  it('vencida el día de entrada: «vencía el …»', () => {
+    expect(textoSugerencia(sv('2026-10-05', null, sugerido('2026-03-12')))).toBe('Sugerido: Diagnóstico + Calibración — vencía el 12/03/2026');
+  });
+
+  it('por vencer el día de entrada: «vence el …»; si vencía ese mismo día, «vencía»', () => {
+    expect(textoSugerencia(sv('2026-10-05', null, sugerido('2026-11-20')))).toBe('Sugerido: Diagnóstico + Calibración — vence el 20/11/2026');
+    expect(textoSugerencia(sv('2026-10-05', null, sugerido('2026-10-05')))).toBe('Sugerido: Diagnóstico + Calibración — vencía el 05/10/2026');
+  });
+
+  it('sin sugerencia, nada', () => {
+    expect(textoSugerencia(sv('2026-10-05', null))).toBeNull();
+  });
+
+  it('el `title` de la etiqueta dice por qué sale y que no cambia nada sola', () => {
+    expect(TITULO_SUGERENCIA).toContain('a 60 días o menos de vencer');
+    expect(TITULO_SUGERENCIA).toContain('«Usar»');
   });
 });

@@ -38,6 +38,7 @@ import {
   type RangoFechas,
   type RolEstado,
   type TipoAbierto,
+  type TipoSugerido,
   type TramoAviso,
   type TramoPlazo,
 } from './dominio.js';
@@ -324,6 +325,11 @@ export interface ServicioVista {
   tipoDesk: string;
   /** El tipo puesto a mano, quién lo puso y cuándo; null si no hay ninguno. */
   tipoManual: TipoManual | null;
+  /**
+   * Sólo en un ticket sin tipo: el que se le SUGIERE porque su equipo del inventario entró con la calibración vencida o a 60 días o
+   * menos de vencer (`tipoSugerido`, dominio.ts). Nunca se aplica solo: «Usar» lo pone a mano por la ruta de siempre. Null si no toca.
+   */
+  tipoSugerido: TipoSugerido | null;
   /** Estado tal como lo nombra Desk. */
   estado: string;
   /** El rol que su estado de AHORA tiene en Configuración: cuenta, standby (reloj en pausa) o terminado (reloj parado). */

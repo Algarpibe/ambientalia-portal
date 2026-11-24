@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   asignarClaves,
   asuntoSinCodigo,
+  CLAVE_TIPO_SUGERIDO,
   claveEstadoDesk,
   claveSerial,
   claveTipoServicio,
@@ -21,6 +22,7 @@ import {
   porOrdenEstadosDesk,
   sumarDias,
   tipoEfectivo,
+  tipoSugerido,
   TIPOS_COMPUESTOS,
   ESTADOS_PLAZO,
   ESTADOS_PLAZO_TERMINADO,
@@ -32,6 +34,7 @@ import {
   esRolEstado,
   rolPausaReloj,
   veredictoTerminado,
+  UMBRAL_SUGERENCIA_DIAS,
 } from './dominio.js';
 
 describe('fechas', () => {
@@ -305,6 +308,59 @@ describe('rol de un estado de Desk y estados del plazo', () => {
 
   it('estadoPlazo sigue clasificando sólo lo que está en marcha', () => {
     expect(['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO']).toContain(estadoPlazo('2026-10-08', '2026-10-06'));
+  });
+});
+
+// Tipo sugerido (diseño del 2026-11-24): a un ticket SIN tipo cuyo equipo entró con la calibración vencida o a 60 días o menos de
+// vencer se le sugiere «Diagnóstico + Calibración». Nunca se aplica solo. La referencia es el día de entrada, no hoy.
+describe('tipo sugerido por el vencimiento de la calibración', () => {
+  const INGRESO = '2026-10-01';
+  /** La fila del tipo en Configuración, como la da `cargarTipos` (con sus días, que la sugerencia no copia). */
+  const SUGERIBLE = { clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', dias: 7 };
+  /** Un ticket sin tipo, entrado el 2026-10-01, cuyo GRIMM (365 días) se calibró el `ultima`. */
+  const sugerir = (ultima: string | null, extra: Partial<Parameters<typeof tipoSugerido>[0]> = {}) =>
+    tipoSugerido({ tipo: '', ultimaCalibracion: ultima, vigencia: 365, ingreso: INGRESO, sugerible: SUGERIBLE, ...extra });
+
+  it('el tipo y el umbral, con nombre: el compuesto «Diagnóstico + Calibración» y 60 días', () => {
+    expect(CLAVE_TIPO_SUGERIDO).toBe(claveTipoServicio('Diagnóstico + Calibración'));
+    expect(partesDeTipo(CLAVE_TIPO_SUGERIDO)).toEqual(['diagnostico', 'calibracion']);
+    expect(UMBRAL_SUGERENCIA_DIAS).toBe(60);
+  });
+
+  it('vencida el día de entrada: se sugiere, con la clave, la etiqueta de Configuración y el día en que venció (y nada más)', () => {
+    expect(sugerir('2025-03-12')).toEqual({ clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', vence: '2026-03-12' });
+  });
+
+  it('vencida hace más de un año (fuera de ciclo): también, sin límite hacia atrás', () => {
+    expect(estadoCalibracion('2024-06-01', INGRESO, 365).estado).toBe('FUERA_CICLO');
+    expect(sugerir('2024-06-01')).toMatchObject({ vence: '2025-06-01' });
+  });
+
+  it('a 60 días justos de vencer, sí; a 61, no', () => {
+    expect(estadoCalibracion('2025-11-30', INGRESO, 365).vigenciaDias).toBe(60);
+    expect(sugerir('2025-11-30')).toMatchObject({ vence: '2026-11-30' });
+    expect(estadoCalibracion('2025-12-01', INGRESO, 365).vigenciaDias).toBe(61);
+    expect(sugerir('2025-12-01')).toBeNull();
+  });
+
+  it('sin calibración conocida, o con una marca sin vencimiento (vigencia null), no', () => {
+    expect(sugerir(null)).toBeNull();
+    expect(sugerir('2025-03-12', { vigencia: null })).toBeNull();
+  });
+
+  it('un ticket con tipo —de Desk o puesto a mano— no recibe sugerencia', () => {
+    expect(sugerir('2025-03-12', { tipo: tipoEfectivo(null, 'Diagnóstico').tipo })).toBeNull();
+    expect(sugerir('2025-03-12', { tipo: tipoEfectivo('Calibración', '').tipo })).toBeNull();
+  });
+
+  it('sin la fila del tipo sugerido en Configuración, o sin día de entrada, no', () => {
+    expect(sugerir('2025-03-12', { sugerible: null })).toBeNull();
+    expect(sugerir('2025-03-12', { ingreso: null })).toBeNull();
+  });
+
+  it('cuenta el día de entrada, no hoy: la misma calibración, con un ingreso anterior, todavía no tocaba', () => {
+    // Vence el 2026-03-12: entrado el 2025-12-01 le quedaban 101 días.
+    expect(sugerir('2025-03-12', { ingreso: '2025-12-01' })).toBeNull();
   });
 });
 

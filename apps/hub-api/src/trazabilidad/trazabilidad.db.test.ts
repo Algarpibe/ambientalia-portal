@@ -575,6 +575,54 @@ describe('servicios abiertos en Desk', () => {
     expect(await servicio(1070)).toMatchObject({ tipoServicio: 'Diagnostico', tipoOrigen: 'desk', tipoDesk: 'Diagnostico', tipoManual: null });
     expect(await servicio(1071)).toMatchObject({ tipoServicio: '', tipoOrigen: null, tipoDesk: '', tipoManual: null });
   });
+
+  // Tipo sugerido (diseño del 2026-11-24): un ticket SIN tipo cuyo equipo del inventario entró con la calibración vencida o a 60 días
+  // o menos de vencer lleva «Diagnóstico + Calibración» como sugerencia. Nunca se pone solo. La referencia es el día de entrada.
+  describe('tipo sugerido por el vencimiento de la calibración', () => {
+    const SUGERIDO = { clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración' };
+
+    beforeEach(async () => {
+      // Otros ficheros de BD dejan calibraciones, marcas o vigencias guardadas: aquí se parte de cero.
+      await db.query('TRUNCATE portal.tmc_calibraciones, portal.tmc_marcas, portal.tmc_marcas_vigencia, portal.tmc_contratos RESTART IDENTITY');
+    });
+
+    it('un GRIMM que entró vencido y sin tipo lleva la sugerencia; con tipo de Desk o puesto a mano, no', async () => {
+      await sembrar([fila('18A00071', 'Cliente Uno', '2025-03-12')]); // sin filas guardadas: vale su fecha del inventario; vence el 2026-03-12
+      await ticket({ numero: 1100, serial: '18A00071', fechaTicket: '2026-10-01' });
+      await ticket({ numero: 1101, serial: '18A00071', fechaTicket: '2026-10-01', tipo: 'Diagnóstico' });
+      expect((await servicio(1100)).tipoSugerido).toEqual({ ...SUGERIDO, vence: '2026-03-12' });
+      expect((await servicio(1101)).tipoSugerido).toBeNull();
+      await repo.fijarTipoServicio(db, 1100, 'Calibración', actor);
+      expect((await servicio(1100)).tipoSugerido).toBeNull();
+    });
+
+    it('calibrarlo durante el servicio no borra la sugerencia: cuenta la calibración del día de entrada', async () => {
+      await sembrar([fila('18A00072', 'Cliente Dos', null)]);
+      await db.query(
+        `INSERT INTO portal.tmc_calibraciones (clave, serial, serial_norm, fecha, origen, estado, por) VALUES
+           ('18A00072', '18A00072', '18A00072', '2025-03-12', 'fst022', 'vigente', 'prueba@example.com'),
+           ('18A00072', '18A00072', '18A00072', '2026-10-03', 'manual', 'vigente', 'prueba@example.com')`,
+      );
+      await ticket({ numero: 1102, serial: '18A00072', fechaTicket: '2026-10-01' });
+      expect((await servicio(1102)).tipoSugerido).toEqual({ ...SUGERIDO, vence: '2026-03-12' });
+      // El inventario ya enseña la de octubre: las dos fechas conviven, cada una con su día de referencia.
+      expect((await repo.listarEquipos(db, hoy)).find((e) => e.clave === '18A00072')).toMatchObject({ ultimaCalibracion: '2026-10-03' });
+    });
+
+    it('fuera del inventario, o en él con una marca sin vigencia (Horiba incluida, sin plazo), no hay sugerencia; con plazo, sí', async () => {
+      await sembrar([fila('V3BW1WJE', 'Cliente Horiba S.A.S.', '2025-03-12')]);
+      await db.query(`UPDATE portal.tmc_equipos SET marca = 'Horiba', en_seguimiento = FALSE`);
+      await ticket({ numero: 1103, serial: 'V3BW1WJE', fechaTicket: '2026-10-01' });
+      // Marca apagada: fuera del inventario (aunque `CLIENTE_POR_SERIAL` le siga dando el nombre del cliente).
+      expect(await servicio(1103)).toMatchObject({ cliente: 'Cliente Horiba S.A.S.', tipoSugerido: null });
+      // Incluida, pero sin vigencia guardada: sin vencimiento.
+      await db.query(`INSERT INTO portal.tmc_marcas (clave, marca, incluida, motivo, por) VALUES ('horiba', 'Horiba', TRUE, 'Prueba ficticia.', 'director@example.com')`);
+      expect((await servicio(1103)).tipoSugerido).toBeNull();
+      // Con 365 días, como un GRIMM: ya entró vencido.
+      await db.query(`INSERT INTO portal.tmc_marcas_vigencia (clave, marca, dias, motivo, por) VALUES ('horiba', 'Horiba', 365, 'Prueba ficticia.', 'director@example.com')`);
+      expect((await servicio(1103)).tipoSugerido).toEqual({ ...SUGERIDO, vence: '2026-03-12' });
+    });
+  });
 });
 
 // El tipo de servicio puesto a mano por ticket (portal.tmc_servicios_tipo):
