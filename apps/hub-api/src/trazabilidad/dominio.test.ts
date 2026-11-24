@@ -10,6 +10,7 @@ import {
   claveTipoServicio,
   diasDeTipo,
   diasEntre,
+  errorNombreTipo,
   esFechaIso,
   estadoCalibracion,
   ESTADOS,
@@ -23,7 +24,10 @@ import {
   sumarDias,
   tipoEfectivo,
   tipoSugerido,
+  tipoBorrable,
+  TIPO_SERVICIO_MAX,
   TIPOS_COMPUESTOS,
+  TIPOS_SEMBRADOS,
   ESTADOS_PLAZO,
   ESTADOS_PLAZO_TERMINADO,
   ETIQUETA_PLAZO,
@@ -361,6 +365,48 @@ describe('tipo sugerido por el vencimiento de la calibración', () => {
   it('cuenta el día de entrada, no hoy: la misma calibración, con un ingreso anterior, todavía no tocaba', () => {
     // Vence el 2026-03-12: entrado el 2025-12-01 le quedaban 101 días.
     expect(sugerir('2025-03-12', { ingreso: '2025-12-01' })).toBeNull();
+  });
+});
+
+// Tipos de servicio creados desde Configuración (diseño del 2026-11-24): el nombre de un tipo nuevo y qué tipos se pueden borrar.
+describe('tipos de servicio creados desde Configuración', () => {
+  const LARGO = 'El nombre no puede pasar de 80 caracteres.';
+
+  it('un nombre vale sin los espacios de los extremos, con alguna letra o algún dígito y hasta 80 caracteres', () => {
+    for (const n of ['Reparación', '  Revisión externa  ', '24h', 'a'.repeat(TIPO_SERVICIO_MAX), ` ${'a'.repeat(80)} `]) expect(errorNombreTipo(n)).toBeNull();
+  });
+
+  it('vacío o sólo espacios: falta el nombre', () => {
+    for (const n of ['', '   ']) expect(errorNombreTipo(n)).toBe('Escribe el nombre del tipo de servicio.');
+  });
+
+  it('sólo símbolos (como «*», la fila por defecto de la agenda): no vale', () => {
+    for (const n of ['*', ' + ', '--', '¿?']) expect(errorNombreTipo(n)).toBe('El nombre tiene que llevar al menos una letra o un número.');
+  });
+
+  it('más de 80 caracteres, o una clave que pasa de 80 al quitar las tildes: no vale', () => {
+    expect(TIPO_SERVICIO_MAX).toBe(80);
+    expect(errorNombreTipo('a'.repeat(81))).toBe(LARGO);
+    expect(claveTipoServicio('가'.repeat(41))).toHaveLength(82);
+    expect(errorNombreTipo('가'.repeat(41))).toBe(LARGO);
+  });
+
+  it('un tipo compuesto, con cualquier grafía: no se crea', () => {
+    for (const n of ['Diagnóstico + Calibración', ' DIAGNOSTICO  +  calibracion ']) expect(errorNombreTipo(n)).toMatch(/es un tipo compuesto/);
+  });
+
+  it('TIPOS_SEMBRADOS: los seis de la 043 y el compuesto de la 045, ya normalizados', () => {
+    expect([...TIPOS_SEMBRADOS].sort()).toEqual(['calibracion', 'diagnostico', 'diagnostico + calibracion', 'garantia', 'mantenimiento', 'no aplica', 'otro']);
+    for (const c of TIPOS_SEMBRADOS) expect(claveTipoServicio(c)).toBe(c);
+  });
+
+  it('se borra sólo un tipo creado en la app, con fila propia y sin tickets abiertos', () => {
+    expect(tipoBorrable({ clave: 'reparacion', conFila: true, ticketsAbiertos: 0 })).toBe(true);
+    expect(tipoBorrable({ clave: 'reparacion', conFila: true, ticketsAbiertos: 1 })).toBe(false);
+    // Uno que sólo traen los tickets no tiene fila que borrar.
+    expect(tipoBorrable({ clave: 'instalacion', conFila: false, ticketsAbiertos: 0 })).toBe(false);
+    // Los sembrados, nunca, aunque nadie los use: volverían con el siguiente arranque.
+    for (const clave of TIPOS_SEMBRADOS) expect(tipoBorrable({ clave, conFila: true, ticketsAbiertos: 0 })).toBe(false);
   });
 });
 

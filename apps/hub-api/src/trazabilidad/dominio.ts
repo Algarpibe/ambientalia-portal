@@ -232,6 +232,58 @@ export function partesDeTipo(clave: string): readonly string[] | null {
   return Object.prototype.hasOwnProperty.call(TIPOS_COMPUESTOS, clave) ? TIPOS_COMPUESTOS[clave] : null;
 }
 
+// ── Tipos de servicio creados desde Configuración ────────────────────────────
+//
+// Diseño del 2026-11-24. En «Configuración» se crean tipos de servicio nuevos y
+// se borran los creados en la app que ningún ticket abierto usa. La regla del
+// nombre y la de qué se puede borrar viven aquí: las aplican el servidor y la
+// pantalla, con el mismo texto.
+
+/**
+ * Lo más largo que puede ser el nombre de un tipo de servicio, y también su
+ * clave: `clave` y `etiqueta` de portal.tmc_plazos (043) y `tipo` de
+ * portal.tmc_agenda_duraciones (051) son VARCHAR(80).
+ */
+export const TIPO_SERVICIO_MAX = 80;
+
+/**
+ * Las claves que siembran las migraciones: la 043 (los seis tipos de Zoho) y la
+ * 045 (el compuesto). No se borran desde la app: volverían solas en el
+ * siguiente arranque (las migraciones se ejecutan en cada inicio, con
+ * `ON CONFLICT DO NOTHING`) y el compuesto necesita sus partes.
+ * `plazos.test.ts` vigila que sean exactamente las de los dos .sql.
+ */
+export const TIPOS_SEMBRADOS: readonly string[] = ['diagnostico', 'calibracion', 'mantenimiento', 'garantia', 'otro', 'no aplica', 'diagnostico + calibracion'];
+
+/**
+ * Por qué no vale `nombre` para CREAR un tipo de servicio, o null si vale. Sin
+ * los espacios de los extremos: de 1 a `TIPO_SERVICIO_MAX` caracteres (y su
+ * clave también, que al quitar tildes puede alargarse en algún alfabeto), con
+ * al menos una letra o un dígito (así no vale «*», la fila por defecto de la
+ * agenda) y sin ser un tipo compuesto (`partesDeTipo`: esos se definen en el
+ * código). La aplican `parseTipoNuevo` y `crearTipo` en el servidor y la fila
+ * de crear de «Configuración».
+ */
+export function errorNombreTipo(nombre: string): string | null {
+  const n = nombre.trim();
+  if (n === '') return 'Escribe el nombre del tipo de servicio.';
+  const clave = claveTipoServicio(n);
+  if (n.length > TIPO_SERVICIO_MAX || clave.length > TIPO_SERVICIO_MAX) return `El nombre no puede pasar de ${TIPO_SERVICIO_MAX} caracteres.`;
+  if (!/[\p{L}\p{N}]/u.test(n)) return 'El nombre tiene que llevar al menos una letra o un número.';
+  if (partesDeTipo(clave)) return `«${n}» es un tipo compuesto: su plazo es la suma del de sus partes y no se crea aquí.`;
+  return null;
+}
+
+/**
+ * Si un tipo de «Configuración» se puede borrar: creado en la app (no está en
+ * `TIPOS_SEMBRADOS`), con fila propia en portal.tmc_plazos (`conFila`; los que
+ * sólo traen los tickets no la tienen) y sin ningún ticket abierto que lo use
+ * (`ticketsAbiertos`, el recuento de la columna «Tickets abiertos»).
+ */
+export function tipoBorrable(t: { clave: string; conFila: boolean; ticketsAbiertos: number }): boolean {
+  return t.conFila && t.ticketsAbiertos === 0 && !TIPOS_SEMBRADOS.includes(t.clave);
+}
+
 /**
  * El plazo, en días hábiles, que vale para un tipo: el suyo si es simple y, si
  * es compuesto, la suma de los de sus partes (null en cuanto a una le falte).

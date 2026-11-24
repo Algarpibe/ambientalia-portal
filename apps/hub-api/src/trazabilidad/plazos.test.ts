@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CONTACTO_MAX_EMAILS, ROLES_ESTADO, TIPOS_COMPUESTOS, claveTipoServicio, type RolEstado } from './dominio.js';
+import { CONTACTO_MAX_EMAILS, ROLES_ESTADO, TIPOS_COMPUESTOS, TIPOS_SEMBRADOS, claveTipoServicio, type RolEstado } from './dominio.js';
 import { ROLES_APP } from './roles.js';
 import { calcularPlazo, calcularReloj, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles, type DatosReloj, type IntervaloEstado } from './plazos.js';
 
@@ -485,6 +485,26 @@ describe('045_trazabilidad_tipo_combinado.sql', () => {
   it('está apuntada en MIGRATIONS, detrás de la 044', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
     expect(db).toMatch(/'044_trazabilidad_servicios_tipo\.sql',\s*'045_trazabilidad_tipo_combinado\.sql'/);
+  });
+});
+
+describe('TIPOS_SEMBRADOS: los tipos que no se borran desde la app', () => {
+  // Candado (2026-11-24): un tipo sembrado volvería solo en el siguiente arranque (las migraciones se ejecutan en cada inicio con
+  // ON CONFLICT DO NOTHING), así que la app no deja borrarlo. La lista vive en dominio.ts; aquí se compara con lo que siembran DE
+  // VERDAD los .sql: si una migración siembra otro tipo, o deja de sembrar uno, esto falla.
+  const MIGRACIONES = fileURLToPath(new URL('../users/migrations/', import.meta.url));
+  const leer = (f: string) => readFileSync(`${MIGRACIONES}${f}`, 'utf8');
+  const clavesSembradas = (f: string) => [...leer(f).matchAll(/\('([^']+)',\s*'([^']+)',\s*(NULL|\d+)\)/g)].map((m) => m[1]);
+
+  it('sólo la 043 y la 045 siembran portal.tmc_plazos', () => {
+    const siembran = readdirSync(MIGRACIONES).filter((f) => f.endsWith('.sql') && /INSERT\s+INTO\s+portal\.tmc_plazos\b/i.test(leer(f)));
+    expect(siembran.sort()).toEqual(['043_trazabilidad_plazos.sql', '045_trazabilidad_tipo_combinado.sql']);
+  });
+
+  it('son exactamente las claves que siembran las dos, ni una más ni una menos', () => {
+    const sembradas = [...clavesSembradas('043_trazabilidad_plazos.sql'), ...clavesSembradas('045_trazabilidad_tipo_combinado.sql')];
+    expect(sembradas).toHaveLength(7);
+    expect([...TIPOS_SEMBRADOS].sort()).toEqual(sembradas.sort());
   });
 });
 
