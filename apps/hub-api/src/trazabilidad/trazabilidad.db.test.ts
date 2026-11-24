@@ -1447,6 +1447,7 @@ describe('tipo compuesto «Diagnóstico + Calibración»', () => {
         { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
       ],
       ticketsAbiertos: 0,
+      borrable: false,
       actualizadoPor: null,
       actualizadoEn: null,
     });
@@ -1546,12 +1547,23 @@ describe('plazos por tipo de servicio', () => {
       dias: null,
       derivadoDe: null,
       ticketsAbiertos: 2,
+      borrable: false,
       actualizadoPor: null,
       actualizadoEn: null,
     });
     expect(p.find((x) => x.clave === 'diagnostico')).toMatchObject({ etiqueta: 'Diagnóstico', dias: 3, ticketsAbiertos: 1 });
     expect(p.find((x) => x.clave === 'verificacion')).toBeUndefined();
     expect(p.find((x) => x.clave === '')).toBeUndefined();
+  });
+
+  it('borrable (2026-11-24): sólo un tipo con fila propia que no siembran las migraciones y que ningún ticket abierto usa', async () => {
+    await db.query(`INSERT INTO portal.tmc_plazos (clave, etiqueta, dias_habiles) VALUES ('reparacion', 'Reparación', 5), ('revision', 'Revisión', NULL)`);
+    await db.query(`INSERT INTO desk.tickets (number, status, status_type, tipo_servicio) VALUES (1, 'x', 'Open', 'Revisión'), (2, 'x', 'Open', 'Instalación'), (3, 'x', 'Closed', 'Reparación')`);
+    const p = await repo.listarPlazos(db);
+    // Ni los sembrados (aunque nadie los use), ni uno en uso, ni uno que sólo traen los tickets. Un ticket cerrado no cuenta.
+    expect(p.filter((x) => x.borrable).map((x) => x.clave)).toEqual(['reparacion']);
+    expect(p.find((x) => x.clave === 'revision')).toMatchObject({ ticketsAbiertos: 1, borrable: false });
+    expect(p.find((x) => x.clave === 'instalacion')).toMatchObject({ ticketsAbiertos: 1, borrable: false });
   });
 
   it('editar persiste, firma con el correo y conserva la etiqueta; vaciar deja «sin plazo»', async () => {

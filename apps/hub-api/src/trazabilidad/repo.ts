@@ -41,6 +41,7 @@ import {
   TIPO_POR_DEFECTO,
   tipoEfectivo,
   tiposDeTickets,
+  tipoBorrable,
   tipoSugerido,
   type CategoriaEstado,
   type ContactoCliente,
@@ -575,7 +576,8 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
     ),
   ]);
   const plazos = resolverPlazos(guardados.rows as Row[]);
-  const m = new Map<string, PlazoServicio>();
+  // `borrable` se decide al final, con los recuentos ya hechos.
+  const m = new Map<string, Omit<PlazoServicio, 'borrable'>>();
   for (const r of guardados.rows as Row[]) {
     m.set(r.clave, {
       clave: r.clave,
@@ -611,7 +613,11 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
     p.ticketsAbiertos += Number(r.n);
     m.set(clave, p);
   }
-  return [...m.values()].sort(porPlazoYEtiqueta);
+  // Se puede borrar (2026-11-24) si se creó en la app, tiene su fila y ningún ticket abierto lo usa (`tipoBorrable`, dominio.ts).
+  const conFila = new Set((guardados.rows as Row[]).map((r) => String(r.clave)));
+  return [...m.values()]
+    .map((p) => ({ ...p, borrable: tipoBorrable({ clave: p.clave, conFila: conFila.has(p.clave), ticketsAbiertos: p.ticketsAbiertos }) }))
+    .sort(porPlazoYEtiqueta);
 }
 
 /**

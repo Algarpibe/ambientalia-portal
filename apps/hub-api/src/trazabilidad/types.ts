@@ -398,6 +398,12 @@ export interface PlazoServicio {
   derivadoDe: PartePlazo[] | null;
   /** Tickets abiertos en Desk con este tipo. */
   ticketsAbiertos: number;
+  /**
+   * True si se puede borrar desde Configuración (2026-11-24, `tipoBorrable`, dominio.ts): creado en la app (no lo siembran la 043 ni
+   * la 045), con fila propia en tmc_plazos y sin ningún ticket abierto. La pantalla enseña «Borrar» con él; el servidor lo vuelve a
+   * comprobar al borrar.
+   */
+  borrable: boolean;
   /** Quién lo cambió por última vez; null si sigue como se sembró. */
   actualizadoPor: string | null;
   actualizadoEn: string | null;
