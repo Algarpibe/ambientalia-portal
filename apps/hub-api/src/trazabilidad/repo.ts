@@ -22,6 +22,7 @@ import {
   contactoDeTickets,
   contactoEfectivo,
   diasDeTipo,
+  errorNombreTipo,
   esCategoriaAgenda,
   esEmailInterno,
   esEtapaAgenda,
@@ -41,6 +42,7 @@ import {
   TIPO_POR_DEFECTO,
   tipoEfectivo,
   tiposDeTickets,
+  TIPOS_SEMBRADOS,
   tipoBorrable,
   tipoSugerido,
   type CategoriaEstado,
@@ -666,6 +668,57 @@ export async function guardarPlazo(db: Db, c: CambioPlazo, actor: Actor): Promis
        actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [claveTipoServicio(c.tipo), c.tipo.trim(), c.dias, actor.userId, actor.email],
   );
+}
+
+/**
+ * Crea un tipo de servicio desde Configuración (POST /trazabilidad/plazos,
+ * 2026-11-24) y lo firma, como `guardarPlazo`. Si ya hay una fila con su clave
+ * normalizada (otra grafía, un sembrado o el compuesto), 409 `tipo_existente` y
+ * no se toca nada: lo decide el `ON CONFLICT DO NOTHING` en la misma sentencia,
+ * sin carrera. El nombre se vuelve a mirar aquí (`errorNombreTipo`) para que
+ * ningún otro camino cree un tipo que la pantalla no dejaría crear.
+ */
+export async function crearTipo(db: Db, c: CambioPlazo, actor: Actor): Promise<void> {
+  const error = errorNombreTipo(c.tipo);
+  if (error) throw new TzError('invalid_input', 400, error, 'tipo');
+  const etiqueta = c.tipo.trim();
+  const { rowCount } = await db.query(
+    `INSERT INTO portal.tmc_plazos (clave, etiqueta, dias_habiles, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (clave) DO NOTHING`,
+    [claveTipoServicio(etiqueta), etiqueta, c.dias, actor.userId, actor.email],
+  );
+  if (!rowCount) {
+    throw new TzError('tipo_existente', 409, `Ya existe el tipo de servicio «${etiqueta}» (o uno que sólo se distingue en tildes, mayúsculas o espacios): no se crea otra vez.`);
+  }
+}
+
+/**
+ * Borra un tipo creado en la app (DELETE /trazabilidad/plazos/:clave,
+ * 2026-11-24): su fila de tmc_plazos y sus días en la agenda (las filas de
+ * tmc_agenda_duraciones de su clave; la «*» de cada etapa, nunca). 409
+ * `tipo_sembrado` sin consultar nada si es de `TIPOS_SEMBRADOS` (volvería con el
+ * siguiente arranque); después, en una transacción con la fila bloqueada, 404
+ * `tipo_no_encontrado` si no tiene fila y 409 `tipo_en_uso` si algún ticket
+ * abierto lo usa (el recuento de `listarPlazos`, el de la columna «Tickets
+ * abiertos»). Los tickets cerrados que lo tuvieron puesto a mano conservan su
+ * etiqueta en tmc_servicios_tipo. No queda historial del borrado.
+ */
+export async function borrarTipo(db: Pool, clave: string): Promise<void> {
+  if (TIPOS_SEMBRADOS.includes(clave)) {
+    throw new TzError('tipo_sembrado', 409, 'Los tipos que trae la app de partida no se borran: volverían solos en el siguiente arranque.');
+  }
+  await withTransaction(db, async (c) => {
+    const { rows } = await c.query(`SELECT etiqueta FROM portal.tmc_plazos WHERE clave = $1 FOR UPDATE`, [clave]);
+    if (rows.length === 0) throw new TzError('tipo_no_encontrado', 404, 'Ese tipo de servicio no tiene fila propia en Configuración: no hay nada que borrar.');
+    const etiqueta = String((rows[0] as Row).etiqueta);
+    const enUso = (await listarPlazos(c)).find((p) => p.clave === clave)?.ticketsAbiertos ?? 0;
+    if (enUso > 0) {
+      throw new TzError('tipo_en_uso', 409, `«${etiqueta}» no se puede borrar: lo ${enUso === 1 ? 'usa 1 ticket abierto' : `usan ${enUso} tickets abiertos`}.`);
+    }
+    await c.query(`DELETE FROM portal.tmc_agenda_duraciones WHERE tipo = $1 AND tipo <> $2`, [clave, TIPO_POR_DEFECTO]);
+    await c.query(`DELETE FROM portal.tmc_plazos WHERE clave = $1`, [clave]);
+  });
 }
 
 /** Suma un voto a `valor` y devuelve el mapa (recuento de grafías o de tipos de un estado). */
