@@ -177,6 +177,11 @@ describe('editar el cargo', () => {
   it('si deshacer la baja de otra fila termina antes, el final del guardado no cierra la edición de otra persona', async () => {
     const marta = { ...ficha('e3', 'Marta Ruiz', 'Técnica'), fechaRetiro: '2099-12-31' };
     await montar([ana, luis, marta]);
+    // Como la red: las recargas responden después del primer pintado. Así la
+    // carrera con la recarga se pierde siempre, y no solo en un CI cargado.
+    api.fetchEmpleados.mockImplementation(
+      () => new Promise((r) => setTimeout(() => r([ana, luis, marta]), 20)),
+    );
     let terminar!: (f: EmpleadoConJefatura) => void;
     api.fijarCargo.mockReturnValue(
       new Promise<EmpleadoConJefatura>((r) => {
@@ -192,7 +197,12 @@ describe('editar el cargo', () => {
 
     // Deshacer la baja de Marta («Deshacer baja») comparte `guardando`: al
     // terminar libera los lápices aunque el guardado de Ana siga en vuelo.
+    // Al terminar recarga la lista y, mientras, la tabla cede el sitio al
+    // «Cargando…»: hay que esperar a que vuelva, no solo a que se liberen los
+    // lápices. Si no, el clic cae justo antes de la recarga y el campo
+    // desaparece con ella (el CI lo perdió el 2026-11-26).
     fireEvent.click(screen.getByRole('button', { name: 'Deshacer baja' }));
+    await waitFor(() => expect(api.fetchEmpleados).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
     fireEvent.click(lapiz('Luis Gómez'));
     fireEvent.change(campo('Luis Gómez'), { target: { value: 'A medias' } });
@@ -200,7 +210,10 @@ describe('editar el cargo', () => {
     terminar({ ...ana, cargo: 'Jefa de taller' });
     await waitFor(() => expect(api.fijarCargo).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText('Cargo de Ana Pérez actualizado.')).toBeTruthy());
-    expect(campo('Luis Gómez').value).toBe('A medias');
+    // El guardado también recarga: la edición de Luis tiene que seguir abierta
+    // cuando la tabla vuelve.
+    await waitFor(() => expect(api.fetchEmpleados).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(campo('Luis Gómez').value).toBe('A medias'));
   });
 
   it('si falla, enseña el error y deja la edición abierta con lo tecleado', async () => {
