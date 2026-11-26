@@ -12,8 +12,8 @@ const SQL_080 = leer('../users/migrations/080_ausencias_registrada_por.sql');
 const SIN_COMENTARIOS = SQL_080.replace(/--.*$/gm, '');
 
 describe('migración 080 (quién registró la incapacidad)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 079, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'079_terms_acceptances\.sql',\s*'080_ausencias_registrada_por\.sql'\];/);
+  it('está apuntada en MIGRATIONS, detrás de la 079', () => {
+    expect(leer('../db.ts')).toMatch(/'079_terms_acceptances\.sql',\s*'080_ausencias_registrada_por\.sql'[,\]]/);
   });
 
   it('añade la columna, nullable y con IF NOT EXISTS (se re-ejecuta en cada arranque)', () => {
