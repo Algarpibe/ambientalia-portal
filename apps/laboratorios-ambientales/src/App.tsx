@@ -6,6 +6,7 @@ import { EMPTY_FILTERS } from './types';
 import { fetchLaboratorios } from './services/api';
 import Buscador from './pages/Buscador';
 import Dashboard from './pages/Dashboard';
+import Prospectos from './pages/Prospectos';
 import type { View } from './lib/view';
 import { hashFor, parseView } from './lib/view';
 
@@ -103,6 +104,14 @@ function App() {
     );
   }
 
+  if (view === 'prospectos' && listos) {
+    return (
+      <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
+        <Prospectos data={data} onBack={() => navegar('main')} />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
       <div className="flex items-center justify-center min-h-screen p-6">
@@ -156,6 +165,13 @@ function App() {
                   className="px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
                 >
                   Análisis de Marcas
+                </a>
+                <a
+                  href={hashFor('prospectos')}
+                  onClick={(e) => abrirVista(e, 'prospectos')}
+                  className="px-8 py-4 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
+                >
+                  Prospectos de grasas y aceites
                 </a>
               </div>
               <p className="mt-6 text-sm text-gray-500">
