@@ -5,6 +5,7 @@ describe('parseView', () => {
   it('reconoce cada vista por su hash', () => {
     expect(parseView('#buscador')).toBe('buscador');
     expect(parseView('#marcas')).toBe('dashboard');
+    expect(parseView('#prospectos')).toBe('prospectos');
   });
 
   it('sin hash, o con uno desconocido, abre el menú', () => {
@@ -20,7 +21,7 @@ describe('parseView', () => {
 
 describe('hashFor', () => {
   it('es el inverso de parseView', () => {
-    for (const view of ['main', 'buscador', 'dashboard'] as const) {
+    for (const view of ['main', 'buscador', 'dashboard', 'prospectos'] as const) {
       expect(parseView(hashFor(view))).toBe(view);
     }
   });
