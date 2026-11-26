@@ -121,23 +121,6 @@ describe('CelebracionRepository', () => {
     expect((await repo.contarVotos(EVENTO)).filter((c) => c.votadoId === bruno)).toEqual([]);
   });
 
-  it('portal_app no borra confirmaciones ni edita votos', async (ctx) => {
-    // En la base compartida del contenedor, portal_app no existe al migrar (la
-    // 081 solo da permisos si el rol existe), y db.roles.db.test.ts puede crearlo
-    // después sin darle permisos aquí. Solo se comprueba si ya los recibió; la
-    // comprobación con rol real vive en db.roles.db.test.ts.
-    const { rows: roles } = await db.query(
-      `SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'portal_app')
-                   THEN has_table_privilege('portal_app', 'portal.celebracion_confirmaciones', 'SELECT')
-                   ELSE false END AS listo`,
-    );
-    if (!(roles[0] as { listo: boolean }).listo) ctx.skip();
-    const { rows } = await db.query(
-      `SELECT has_table_privilege('portal_app', 'portal.celebracion_confirmaciones', 'DELETE') AS borra,
-              has_table_privilege('portal_app', 'portal.celebracion_confirmaciones', 'UPDATE') AS reemplaza,
-              has_table_privilege('portal_app', 'portal.celebracion_votos', 'UPDATE') AS edita,
-              has_table_privilege('portal_app', 'portal.celebracion_votos', 'DELETE') AS retira`,
-    );
-    expect(rows[0]).toEqual({ borra: false, reemplaza: true, edita: false, retira: true });
-  });
+  // Los permisos de portal_app sobre las tablas de la 081 se comprueban solo en
+  // db.roles.db.test.ts: aquí el rol no existe al migrar y no se darían.
 });
