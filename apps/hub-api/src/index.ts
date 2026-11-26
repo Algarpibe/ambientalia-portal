@@ -16,6 +16,7 @@ import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
 import { createAusenciasRouter } from './ausencias/router.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
+import { createLaboratoriosRouter } from './laboratorios/router.js';
 import { createTrazabilidadRouter } from './trazabilidad/router.js';
 import { iniciarRegistroEstados } from './trazabilidad/registro-estados.js';
 import { iniciarPasadasNocturnas } from './trazabilidad/programador-pasadas.js';
@@ -160,6 +161,8 @@ initDb()
     app.use('/api', createAusenciasRouter(getHubPool()));
     // Router de Calibraciones (patrones de transferencia de O3, ISO/IEC 17025).
     app.use('/api', createCalibracionesRouter(getHubPool()));
+    // Cruce de los prospectos de Laboratorios ambientales con Zoho por NIT.
+    app.use('/api', createLaboratoriosRouter(getHubPool()));
     // Router de Trazabilidad Mantenimientos Clientes (vencimientos GRIMM EDM 180).
     // La fuente de la agenda del taller es UNA para las rutas y para el
     // programador: comparten su cortacircuitos (si Desk 2.0 cae, ni unas ni otro
