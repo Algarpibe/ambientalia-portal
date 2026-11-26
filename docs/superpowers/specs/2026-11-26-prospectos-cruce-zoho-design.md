@@ -101,7 +101,7 @@ de contacto se lee de `raw ->> 'contact_type'` (`customer`).
 fecha más reciente de cada tipo. Las categorías van como parámetros (`$1`, `$2`).
 
 **Caché.** El resultado completo de `agruparPorNit` se guarda con `cached`
-(clave `laboratorios-clientes`, 2 minutos). Cada respuesta filtra ese mapa con
+(clave `laboratorios:clientes`, 2 minutos). Cada respuesta filtra ese mapa con
 los NIT pedidos. Nadie puede sacar la lista completa de clientes: solo el cruce
 de los NIT que envía, y la app solo envía los del dataset público.
 

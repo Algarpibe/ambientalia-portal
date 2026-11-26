@@ -69,7 +69,16 @@ SELECT count(*) FILTER (WHERE nit ~ '^[0-9]{10}$') AS diez_digitos_sin_guion,
        count(*) FILTER (WHERE nit LIKE '%-%')      AS con_guion,
        count(*) FILTER (WHERE nit <> '')           AS con_nit
   FROM books.contacts;
+SELECT data_type FROM information_schema.columns
+ WHERE table_schema = 'books' AND table_name = 'invoices' AND column_name = 'date';
+SELECT count(DISTINCT c.contact_id) AS con_facturas_y_no_cliente
+  FROM books.contacts c
+  JOIN books.invoices i ON i.customer_id = c.contact_id AND i.status NOT IN ('void', 'draft')
+ WHERE c.raw ->> 'contact_type' IS DISTINCT FROM 'customer';
 ```
+
+- La penúltima dice si `invoices.date` es `date` o `timestamptz`. Con `timestamptz`, el `to_char` depende de la zona horaria de la sesión: se cambia por `MAX(i.date)::date`.
+- La última cuenta los contactos con facturas que ya no son de tipo cliente. Si salen más de 0, el filtro de tipo pasa a ser «cliente, o con alguna factura que cuente»: `HAVING bool_or(c.raw ->> 'contact_type' = 'customer') OR MAX(i.date) IS NOT NULL`, en lugar de la condición del `WHERE`.
 
 Qué cambia según la respuesta:
 - **No existe `raw` en `books.contacts`** (la tercera consulta falla): si hay una columna `contact_type`, la línea del filtro de la Tarea 1 pasa a `AND c.contact_type = 'customer'`. Si no hay ninguna de las dos, se quita la línea y se anota en el README que los proveedores con NIT cuentan como «En Zoho sin compras».
