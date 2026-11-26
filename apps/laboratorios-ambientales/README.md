@@ -34,7 +34,11 @@ porque el bundle lo produce el portal.
 | `src/lib/pagination.ts` | Paginación de la tabla de resultados. |
 | `src/lib/equipment.ts` | Catálogo de 46 equipos de calidad del aire. |
 | `src/lib/brands.ts` | Agrupación laboratorio→equipos del Análisis de Marcas. |
-| `src/pages/` | Vistas: `Buscador` y `Dashboard` (Análisis de Marcas). |
+| `src/lib/prospects.ts` | Prospectos de grasas y aceites: qué acreditación cuenta, infrarrojo o gravimetría, agrupación por laboratorio, vigencia, orden y filtros. |
+| `src/lib/exportProspects.ts` | Filas y nombre de fichero del Excel de prospectos. |
+| `src/lib/fechas.ts` | Fecha local de hoy y suma de meses de calendario. |
+| `src/lib/view.ts` | La vista abierta, en el hash de la URL (`#buscador`, `#marcas`, `#prospectos`). |
+| `src/pages/` | Vistas: `Buscador`, `Dashboard` (Análisis de Marcas) y `Prospectos`. |
 | `src/App.tsx` | Shell: carga, errores y navegación. |
 
 La lógica pura vive en `src/lib/` con tests unitarios; los componentes de
@@ -120,8 +124,44 @@ campo «método». Estado real: **38 de los 46 códigos aparecen** en el dataset
 usa normas internas sin código. Si el IDEAM acredita un equipo nuevo, hay que
 añadirlo aquí o no aparecerá en el Análisis de Marcas.
 
+## Prospectos de grasas y aceites
+
+Vista `#prospectos`, para el estudio de mercado del Horiba OCMA-500 (cifras del
+2026-11-26: 90 laboratorios, 85 NIT). Lista los laboratorios, por código de
+laboratorio, con una acreditación **Activa** cuya variable contiene «grasa» y
+«aceite» (sin tildes ni mayúsculas, en cualquier matriz), y los separa en dos
+pestañas:
+
+| Pestaña | Regla |
+|---|---|
+| Usan infrarrojo (26) | Alguna acreditación tiene una técnica con «fotometr» o «infrarroj»; o, si la técnica no informa nada (vacía, «---», «No Aplica»), un método `5520 C`, `NTC 3362 C` o `D7066`. |
+| Solo gravimetría (64) | El resto. Hoy todos son gravimétricos (SM 5520 B y D, EPA 9071 B); si apareciera otra técnica, caería aquí y se vería en la columna de métodos. |
+
+- **El dataset no identifica el equipo.** En grasas y aceites,
+  `identificaci_n_de_equipo` vale siempre «No Aplica» y ningún método nombra
+  OCMA ni Horiba: la vista no sabe quién tiene un OCMA. Eso lo dirían Zoho o
+  Desk 2.0, que quedan fuera.
+- **Vigencia más próxima:** la fecha `hasta` más temprana de sus acreditaciones
+  de grasas y aceites («---» no cuenta). «Vence en menos de 6 meses» va de hoy a
+  hoy + 6 meses de calendario, con el límite fuera; si ese día no existe, el
+  límite es el último del mes (31 de agosto → 28 de febrero, o 29 en bisiesto).
+- **Orden:** de la vigencia más cercana a la más lejana, los sin fecha al final;
+  a igual fecha, por nombre.
+- **Filtros:** departamento y búsqueda por nombre o NIT, sin mayúsculas ni
+  tildes; el NIT también se encuentra sin puntos ni guion. El estado de la
+  vista es local: se pierde al volver al menú.
+- **Exportar a Excel** descarga lo que se ve (pestaña, filtros y orden) en
+  `prospectos-grasas-aceites-<infrarrojo|gravimetria>-<AAAA-MM-DD>.xlsx`, con una
+  hoja «Prospectos». SheetJS se carga al pulsar. Todas las celdas son texto.
+  **El Excel lleva los datos de contacto**, que son datos personales (Ley 1581
+  de 2012): se aprobó así.
+- **En el Buscador,** «Aceites y Grasas» y «Grasas y Aceites» son una sola
+  casilla: `variableKey` lleva un sinónimo explícito, solo para ese par.
+
 ## Mejoras pendientes
 
+- Cruzar los prospectos con Zoho por NIT (cliente o no, si se le vendió un
+  OCMA). La tabla admite una columna «Cliente» más sin rehacerse.
 - El cache completo (~3 MB) va a `localStorage`, que comparte los ~5 MB del
   origen con el resto del portal. Si empieza a fallar por cuota, migrar a
   IndexedDB. Hoy degrada limpio: si no cabe, se sigue con los datos en memoria.
