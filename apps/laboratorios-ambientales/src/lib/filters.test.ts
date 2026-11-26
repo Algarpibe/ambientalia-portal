@@ -197,3 +197,41 @@ describe('selección de variables por grafía', () => {
     expect(toggleVariable(['pH'], 'Plomo')).toEqual(['pH', 'Plomo']);
   });
 });
+
+// La misma variable llega con el orden cambiado: «Aceites y Grasas» (116 filas),
+// «Grasas y Aceites» (35), «Aceites y grasas» y «Grasas y aceites».
+describe('grasas y aceites: un sinónimo explícito', () => {
+  const GYA: Laboratorio[] = [
+    lab({ variable: 'Aceites y Grasas' }),
+    lab({ variable: 'Aceites y Grasas' }),
+    lab({ variable: 'Grasas y Aceites' }),
+    lab({ variable: 'Aceites y grasas' }),
+    lab({ variable: 'Grasas y aceites' }),
+    lab({ variable: 'pH' }),
+  ];
+
+  it('con «Aceites y Grasas» marcado salen también los registros «Grasas y Aceites»', () => {
+    expect(applyFilters(GYA, { ...EMPTY_FILTERS, variables: ['Aceites y Grasas'] })).toHaveLength(5);
+  });
+
+  it('y al revés', () => {
+    expect(applyFilters(GYA, { ...EMPTY_FILTERS, variables: ['Grasas y Aceites'] })).toHaveLength(5);
+  });
+
+  it('las cuatro grafías son una sola casilla, con la más frecuente', () => {
+    expect(optionsFor(GYA, 'variable', EMPTY_FILTERS)).toEqual(['Aceites y Grasas', 'pH']);
+  });
+
+  it('la casilla cuenta como marcada aunque se marcara con el otro orden', () => {
+    expect(isVariableSelected(['Grasas y Aceites'], 'Aceites y Grasas')).toBe(true);
+  });
+
+  it('el sinónimo es solo para ese par', () => {
+    const OTRAS: Laboratorio[] = [
+      lab({ variable: 'Aceites y Grasas' }),
+      lab({ variable: 'Grasas' }),
+      lab({ variable: 'Aceites minerales' }),
+    ];
+    expect(applyFilters(OTRAS, { ...EMPTY_FILTERS, variables: ['Grasas y Aceites'] })).toHaveLength(1);
+  });
+});

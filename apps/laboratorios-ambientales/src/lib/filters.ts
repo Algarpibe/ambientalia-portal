@@ -29,7 +29,16 @@ const compare = (a: string, b: string): number => a.localeCompare(b, 'es');
 // El colapso de \s+ replica el que normalize.ts ya hace por el mismo motivo.
 // applyFilters y optionsFor DEBEN usar esta misma clave: si difirieran, elegir
 // la opción canónica dejaría fuera los registros de las demás grafías.
-const variableKey = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, ' ');
+// Los sinónimos van uno a uno y solo donde los datos lo piden: «Aceites y
+// Grasas» (116 filas) y «Grasas y Aceites» (35) son la misma variable con el
+// orden cambiado. Un Map y no un objeto: una variable llamada «constructor»
+// encontraría la del prototipo.
+const SINONIMOS_VARIABLE = new Map([['aceites y grasas', 'grasas y aceites']]);
+
+const variableKey = (value: string): string => {
+  const clave = value.trim().toLowerCase().replace(/\s+/g, ' ');
+  return SINONIMOS_VARIABLE.get(clave) ?? clave;
+};
 
 // La casilla de una variable debe comparar con la misma clave que applyFilters:
 // la grafía que se ofrece puede cambiar al mover otro filtro (cambia la más
