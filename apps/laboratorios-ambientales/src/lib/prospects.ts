@@ -78,9 +78,9 @@ export function esGrasasYAceites(registro: Pick<Laboratorio, 'estado' | 'variabl
 const TECNICA_SIN_DATO = new Set(['', '---', 'no aplica']);
 
 // Los métodos por infrarrojo: SM 5520 C, NTC 3362 C (con o sin «Método» o
-// «Métodos» delante de la C) y ASTM D7066. El \b impide que la C case con el
-// principio de otra palabra.
-const METODO_INFRARROJO = /5520 c\b|ntc 3362 (?:metodos? )?c\b|d7066/;
+// «Métodos» delante de la C) y ASTM D7066, que el dataset escribe «D 7066». El
+// \b impide que la C case con el principio de otra palabra.
+const METODO_INFRARROJO = /5520 c\b|ntc 3362 (?:metodos? )?c\b|d ?7066/;
 
 export function esInfrarrojo(registro: Pick<Laboratorio, 'tecnica' | 'metodo'>): boolean {
   const tecnica = clave(registro.tecnica);

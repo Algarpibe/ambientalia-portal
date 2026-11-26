@@ -106,6 +106,8 @@ describe('esInfrarrojo', () => {
       'NTC 3362 Método C',
       'NTC 3362 C Modificado',
       'NTC 3362 C, F',
+      // El dataset lo escribe con espacio («ASTM D 7066-04»); sin él también vale.
+      'ASTM D 7066-04',
       'ASTM D7066-04',
     ];
     for (const tecnica of ['', '---', 'No Aplica']) {
