@@ -87,3 +87,65 @@ export function esInfrarrojo(registro: Pick<Laboratorio, 'tecnica' | 'metodo'>):
   if (!TECNICA_SIN_DATO.has(tecnica)) return tecnica.includes('fotometr') || tecnica.includes('infrarroj');
   return METODO_INFRARROJO.test(clave(registro.metodo));
 }
+
+// `hasta` llega como «2027-04-21T00:00:00.000» o como «---».
+const FECHA_ISO = /^(\d{4}-\d{2}-\d{2})/;
+
+function fechaDeHasta(hasta: string): string | null {
+  const encontrada = FECHA_ISO.exec(hasta.trim());
+  return encontrada ? encontrada[1] : null;
+}
+
+const compararTexto = (a: string, b: string): number => a.localeCompare(b, 'es');
+
+function distintos(valores: string[]): string[] {
+  return [...new Set(valores.map((valor) => valor.trim()).filter(Boolean))].sort(compararTexto);
+}
+
+function aProspecto(filas: Laboratorio[]): Prospecto {
+  // El primer valor no vacío en el orden del dataset: el contacto o el teléfono
+  // faltan a menudo en una fila y están en otra del mismo laboratorio.
+  const primero = (campo: keyof Laboratorio): string => {
+    for (const fila of filas) {
+      const valor = fila[campo].trim();
+      if (valor) return valor;
+    }
+    return '';
+  };
+  // AAAA-MM-DD se ordena bien como texto: tras el sort, la primera es la más temprana.
+  const fechas = filas
+    .map((fila) => fechaDeHasta(fila.hasta))
+    .filter((fecha): fecha is string => fecha !== null)
+    .sort();
+
+  return {
+    codigo: primero('codigo'),
+    nombre: primero('nombreLaboratorio'),
+    nit: primero('nit'),
+    ciudad: primero('ciudad'),
+    departamento: primero('departamento'),
+    contacto: primero('contacto'),
+    telefono: primero('telefono'),
+    correo: primero('correo'),
+    matrices: distintos(filas.map((fila) => fila.matriz)),
+    metodos: distintos(filas.map((fila) => fila.metodo)),
+    grupo: filas.some(esInfrarrojo) ? 'infrarrojo' : 'gravimetria',
+    vigenciaMasProxima: fechas[0] ?? null,
+  };
+}
+
+// Por código de laboratorio y no por NIT: una misma empresa tiene varias sedes
+// acreditadas, cada una con su código. Sin código, por nombre. Los prefijos
+// impiden que un nombre choque con un código. El Map conserva el orden del dataset.
+export function groupProspects(data: Laboratorio[]): Prospecto[] {
+  const porLaboratorio = new Map<string, Laboratorio[]>();
+  for (const registro of data) {
+    if (!esGrasasYAceites(registro)) continue;
+    const codigo = registro.codigo.trim();
+    const id = codigo ? `codigo:${codigo}` : `nombre:${registro.nombreLaboratorio.trim()}`;
+    const filas = porLaboratorio.get(id);
+    if (filas) filas.push(registro);
+    else porLaboratorio.set(id, [registro]);
+  }
+  return [...porLaboratorio.values()].map(aProspecto);
+}
