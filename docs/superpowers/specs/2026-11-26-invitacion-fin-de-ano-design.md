@@ -151,11 +151,11 @@ desactivada dejan de aparecer en el muro y en el resumen.
 
 ### Portal
 
-- **Ruta `/fin-de-ano`**, fuera del shell (sin menú lateral), como `/terminos`,
+- **Ruta `/celebracion-navidad-2026`**, fuera del shell (sin menú lateral), como `/terminos`,
   envuelta en `RequireAuth`. Quien llega sin sesión pasa por el login y vuelve a
   la página (`destinoTrasLogin` ya lo hace).
 - **Aviso en el Inicio** (`Dashboard`): «🥂 Confirma tu asistencia al almuerzo de
-  fin de año», con enlace a `/fin-de-ano`. Se muestra mientras la persona no
+  fin de año», con enlace a `/celebracion-navidad-2026`. Se muestra mientras la persona no
   haya respondido y las confirmaciones sigan abiertas. Usa `mi-estado`.
 - La página se divide en componentes pequeños (portada, contador, tarjetas del
   evento, muro, modal de cualidades, confirmación, pase, panel de admin), con
@@ -248,9 +248,9 @@ TDD estricto: primero la prueba que falla, después el código.
 2. Después el portal.
 3. No toca n8n.
 
-Link para el WhatsApp: `https://portal.ambientalia.cloud/fin-de-ano`. El dominio
-es el `PORTAL_URL` por defecto de hub-api y hay que confirmarlo antes de enviar
-el mensaje.
+Link para el WhatsApp, confirmado por el usuario:
+`https://portal.ambientalia.cloud/celebracion-navidad-2026`. Hay que enviarlo
+después de desplegar: antes, la ruta no existe y el portal manda al Inicio.
 
 ## Fuera de alcance
 
