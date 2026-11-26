@@ -160,3 +160,39 @@ export function estadoVigencia(fecha: string | null, hoy: string): EstadoVigenci
   if (fecha < sumarMeses(hoy, MESES_DE_AVISO)) return 'pronto';
   return 'vigente';
 }
+
+// De la vigencia más cercana a la más lejana, con los «sin fecha» al final. A
+// igual fecha, por nombre. Devuelve una lista nueva: no toca la recibida.
+export function sortProspects(prospectos: Prospecto[]): Prospecto[] {
+  return [...prospectos].sort((a, b) => {
+    if (a.vigenciaMasProxima !== b.vigenciaMasProxima) {
+      if (a.vigenciaMasProxima === null) return 1;
+      if (b.vigenciaMasProxima === null) return -1;
+      return a.vigenciaMasProxima < b.vigenciaMasProxima ? -1 : 1;
+    }
+    return compararTexto(a.nombre, b.nombre);
+  });
+}
+
+// Un NIT se encuentra también sin puntos ni guion («800333444» encuentra
+// «800.333.444-5»), pero solo si lo tecleado son cifras y separadores: si no, las
+// cifras de un nombre («Ambiental 2») casarían con cualquier NIT que las tenga.
+const PARECE_NIT = /^[\d\s.-]+$/;
+const soloCifras = (texto: string): string => texto.replace(/\D/g, '');
+
+export function filterProspects(prospectos: Prospecto[], filtros: FiltrosProspectos): Prospecto[] {
+  const busqueda = clave(filtros.busqueda);
+  const cifras = PARECE_NIT.test(busqueda) ? soloCifras(busqueda) : '';
+  return prospectos.filter((prospecto) => {
+    if (prospecto.grupo !== filtros.grupo) return false;
+    if (filtros.departamento && prospecto.departamento !== filtros.departamento) return false;
+    if (!busqueda) return true;
+    if (clave(prospecto.nombre).includes(busqueda) || clave(prospecto.nit).includes(busqueda)) return true;
+    return cifras !== '' && soloCifras(prospecto.nit).includes(cifras);
+  });
+}
+
+// Las opciones del desplegable de departamento: distintas, sin vacíos y ordenadas.
+export function departamentosDe(prospectos: Prospecto[]): string[] {
+  return distintos(prospectos.map((prospecto) => prospecto.departamento));
+}

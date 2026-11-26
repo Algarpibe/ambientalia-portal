@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import type { Laboratorio } from '../types';
 import { mapRecord } from '../services/api';
-import { esGrasasYAceites, esInfrarrojo, estadoVigencia, groupProspects } from './prospects';
+import type { Prospecto } from './prospects';
+import {
+  departamentosDe,
+  esGrasasYAceites,
+  esInfrarrojo,
+  estadoVigencia,
+  filterProspects,
+  groupProspects,
+  sortProspects,
+} from './prospects';
 
 // Una fila con la forma real del dataset (como RAW en services/api.test.ts),
 // pasada por mapRecord igual que en la app. Variable, técnica, método, matriz y
@@ -262,5 +271,112 @@ describe('estadoVigencia', () => {
   it('y en bisiesto, el 29 de febrero', () => {
     expect(estadoVigencia('2028-02-28', '2027-08-31')).toBe('pronto');
     expect(estadoVigencia('2028-02-29', '2027-08-31')).toBe('vigente');
+  });
+});
+
+// Un prospecto ya armado, para probar el orden y los filtros sin pasar por
+// groupProspects. Datos ficticios.
+const prospecto = (over: Partial<Prospecto> = {}): Prospecto => ({
+  codigo: '101',
+  nombre: 'LABORATORIO ANDINO DE AGUAS S.A.S.',
+  nit: '900.000.001-1',
+  ciudad: 'Medellín',
+  departamento: 'Antioquia',
+  contacto: '',
+  telefono: '',
+  correo: '',
+  matrices: ['Agua'],
+  metodos: ['SM 5520 B'],
+  grupo: 'gravimetria',
+  vigenciaMasProxima: '2027-04-21',
+  ...over,
+});
+
+const nombres = (lista: Prospecto[]): string[] => lista.map((p) => p.nombre);
+
+describe('sortProspects', () => {
+  it('de la vigencia más cercana a la más lejana, y los sin fecha al final', () => {
+    const ordenados = sortProspects([
+      prospecto({ nombre: 'Alfa', vigenciaMasProxima: null }),
+      prospecto({ nombre: 'Beta', vigenciaMasProxima: '2028-01-10' }),
+      prospecto({ nombre: 'Gamma', vigenciaMasProxima: '2026-12-01' }),
+    ]);
+    expect(nombres(ordenados)).toEqual(['Gamma', 'Beta', 'Alfa']);
+  });
+
+  it('a igual fecha, por nombre en español', () => {
+    const ordenados = sortProspects([
+      prospecto({ nombre: 'Centro' }),
+      prospecto({ nombre: 'BIOLAB' }),
+      prospecto({ nombre: 'Álamo' }),
+    ]);
+    expect(nombres(ordenados)).toEqual(['Álamo', 'BIOLAB', 'Centro']);
+  });
+
+  it('los sin fecha también se ordenan por nombre', () => {
+    const ordenados = sortProspects([
+      prospecto({ nombre: 'Zeta', vigenciaMasProxima: null }),
+      prospecto({ nombre: 'Delta', vigenciaMasProxima: null }),
+    ]);
+    expect(nombres(ordenados)).toEqual(['Delta', 'Zeta']);
+  });
+
+  it('no toca la lista recibida', () => {
+    const lista = [prospecto({ nombre: 'Beta' }), prospecto({ nombre: 'Alfa' })];
+    sortProspects(lista);
+    expect(nombres(lista)).toEqual(['Beta', 'Alfa']);
+  });
+});
+
+describe('filterProspects', () => {
+  const LISTA = [
+    prospecto({ codigo: '1', nombre: 'LABORATORIO QUÍMICO DEL VALLE', nit: '900.111.222-3', departamento: 'Valle del Cauca', grupo: 'infrarrojo' }),
+    prospecto({ codigo: '2', nombre: 'Aguas de Antioquia', nit: '800.333.444-5', departamento: 'Antioquia', grupo: 'infrarrojo' }),
+    prospecto({ codigo: '3', nombre: 'Laboratorio Ambiental 2', nit: '901.222.000-1', departamento: 'Antioquia', grupo: 'gravimetria' }),
+  ];
+  const codigos = (lista: Prospecto[]): string[] => lista.map((p) => p.codigo);
+  const filtrar = (grupo: Prospecto['grupo'], departamento: string, busqueda: string) =>
+    codigos(filterProspects(LISTA, { grupo, departamento, busqueda }));
+
+  it('se queda con el grupo de la pestaña', () => {
+    expect(filtrar('infrarrojo', '', '')).toEqual(['1', '2']);
+    expect(filtrar('gravimetria', '', '')).toEqual(['3']);
+  });
+
+  it('departamento vacío son todos; con valor, solo ese', () => {
+    expect(filtrar('infrarrojo', 'Antioquia', '')).toEqual(['2']);
+  });
+
+  it('busca por nombre sin distinguir mayúsculas ni tildes', () => {
+    expect(filtrar('infrarrojo', '', 'quimico')).toEqual(['1']);
+    expect(filtrar('infrarrojo', '', '  AGUAS de ANTIOQUÍA ')).toEqual(['2']);
+  });
+
+  it('busca por NIT, con o sin puntos ni guion', () => {
+    expect(filtrar('infrarrojo', '', '800.333')).toEqual(['2']);
+    expect(filtrar('infrarrojo', '', '800333444')).toEqual(['2']);
+    expect(filtrar('infrarrojo', '', '800333444-5')).toEqual(['2']);
+  });
+
+  it('las cifras de un nombre no casan con un NIT', () => {
+    // Los NIT de 1 y 2 llevan un 2, pero «ambiental 2» no es un NIT.
+    expect(filtrar('infrarrojo', '', 'ambiental 2')).toEqual([]);
+  });
+
+  it('la búsqueda y el departamento se suman', () => {
+    expect(filtrar('infrarrojo', 'Antioquia', 'quimico')).toEqual([]);
+  });
+});
+
+describe('departamentosDe', () => {
+  it('los departamentos distintos, sin vacíos y ordenados', () => {
+    const lista = [
+      prospecto({ departamento: 'Valle del Cauca' }),
+      prospecto({ departamento: 'Antioquia' }),
+      prospecto({ departamento: '' }),
+      prospecto({ departamento: 'Antioquia' }),
+      prospecto({ departamento: 'Atlántico' }),
+    ];
+    expect(departamentosDe(lista)).toEqual(['Antioquia', 'Atlántico', 'Valle del Cauca']);
   });
 });
