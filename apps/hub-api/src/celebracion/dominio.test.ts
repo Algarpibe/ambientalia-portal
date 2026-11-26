@@ -79,7 +79,7 @@ describe('parseConfirmacion', () => {
   });
 
   it('rechaza caracteres de control y separadores de línea dentro del mensaje', () => {
-    for (const raro of ['a\nb', 'a\tb', 'a\u0085b', 'a b']) {
+    for (const raro of ['a\nb', 'a\tb', 'a\u0085b', 'a\u2028b']) {
       expect(resultado(() => parseConfirmacion({ asiste: false, mensaje: raro }))).toBe('400:mensaje_invalido');
     }
   });
