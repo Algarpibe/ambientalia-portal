@@ -28,7 +28,7 @@ porque el bundle lo produce el portal.
 
 | Ruta | Responsabilidad |
 |---|---|
-| `src/services/api.ts` | Descarga paginada del dataset + cache de 24 h en `localStorage`. |
+| `src/services/api.ts` | Descarga paginada del dataset + cache de 24 h en `localStorage` (ver «Carga y cache»). |
 | `src/lib/normalize.ts` | Valores canónicos de estado, matriz, componente y actividad. |
 | `src/lib/filters.ts` | Filtrado y opciones en cascada. |
 | `src/lib/pagination.ts` | Paginación de la tabla de resultados. |
@@ -39,6 +39,28 @@ porque el bundle lo produce el portal.
 
 La lógica pura vive en `src/lib/` con tests unitarios; los componentes de
 `src/pages/` solo la orquestan.
+
+## Carga y cache
+
+`fetchLaboratorios` guarda el dataset en `localStorage` durante 24 h y decide
+según lo que encuentre al arrancar:
+
+| Cache | Qué pasa |
+|---|---|
+| Fresco (< 24 h) | Se usa tal cual; no se toca la red. |
+| Caducado | Sus datos se enseñan al momento y la descarga va en segundo plano, sin spinner. Al terminar, App cambia los datos por los nuevos; los filtros se conservan porque viven en App. Si esa descarga falla, se sigue con lo rancio sin avisar. |
+| No hay | Descarga en primer plano con el contador de registros. Si falla, sale el error con Reintentar. |
+
+- **Un timestamp corrupto o en el futuro cuenta como caducado.** El cache es
+  fresco solo si su edad es un número finito entre 0 y 24 h. Antes, un `NaN` o
+  un reloj mal puesto lo dejaban fresco para siempre y la app no volvía a
+  descargar nunca.
+- **Si lo guardado no es un array, no hay cache**, ni fresco ni rancio: App hace
+  `data.map` y un objeto la reventaría.
+- **Cada página tiene un tope de 60 s** (`REQUEST_TIMEOUT_MS`), que cubre también
+  la lectura del cuerpo. Si datos.gov.co no contesta, la carga falla con
+  «datos.gov.co no respondió en 60 s» en vez de dejar el spinner girando sin
+  botón de Reintentar.
 
 ## Notas sobre los datos
 

@@ -47,7 +47,10 @@ function App() {
     setError('');
     setProgreso(0);
     try {
-      const result = await fetchLaboratorios(setProgreso);
+      // Con un cache caducado se enseñan sus datos al momento y setData los
+      // cambia por los nuevos cuando acaba la descarga de fondo. Los filtros no
+      // se pierden en el cambio porque viven aquí, en App.
+      const result = await fetchLaboratorios(setProgreso, setData);
       setData(result);
     } catch (err) {
       // fetchLaboratorios lanza cuando la red falla y no hay cache. Tragarse el

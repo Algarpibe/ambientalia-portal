@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mapRecord, fetchLaboratorios, PAGE_SIZE } from './api';
+import type { Laboratorio } from '../types';
+import { mapRecord, fetchLaboratorios, PAGE_SIZE, REQUEST_TIMEOUT_MS } from './api';
 
 // Registro real de la API, recortado a los campos que mapeamos.
 const RAW = {
@@ -28,8 +29,16 @@ const RAW = {
 
 const page = (n: number) => Array.from({ length: n }, () => RAW);
 
+// Como en un fetch real, lo que depende de la señal solo termina cuando se
+// aborta: así se simula a datos.gov.co sin contestar.
+const hastaQueAborte = (signal?: AbortSignal | null) =>
+  new Promise<never>((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')));
+  });
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('mapRecord', () => {
@@ -125,6 +134,42 @@ describe('fetchLaboratorios', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
     await expect(fetchLaboratorios()).rejects.toThrow('503');
   });
+
+  // Sin timeout, si datos.gov.co no contesta el spinner gira para siempre y el
+  // botón de Reintentar no llega a salir nunca.
+  it('si datos.gov.co no responde en 60 s y no hay cache, lanza con un mensaje claro', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => hastaQueAborte(init?.signal)));
+
+    let terminada = false;
+    const fin = () => {
+      terminada = true;
+    };
+    const promesa = fetchLaboratorios();
+    void promesa.then(fin, fin);
+    const rechazo = expect(promesa).rejects.toThrow('datos.gov.co no respondió en 60 s');
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+    expect(terminada).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rechazo;
+  });
+
+  // Las cabeceras pueden llegar y el cuerpo quedarse a medias: el temporizador
+  // no puede apagarse al resolver fetch, sino tras leer el JSON.
+  it('si la respuesta llega pero el cuerpo se queda colgado, también corta a los 60 s', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) =>
+        Promise.resolve({ ok: true, json: () => hastaQueAborte(init?.signal) }),
+      ),
+    );
+
+    const rechazo = expect(fetchLaboratorios()).rejects.toThrow('datos.gov.co no respondió en 60 s');
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    await rechazo;
+  });
 });
 
 // Los tests corren en el entorno 'node' de vitest, donde localStorage no existe:
@@ -169,18 +214,56 @@ describe('fetchLaboratorios: cache de localStorage', () => {
     expect(data[0].metodo).toBe('SM 2320 B');
   });
 
-  it('con cache caducado (>24 h) vuelve a descargar y lo refresca', async () => {
+  // Caducado no es inservible: con datos ya a mano no tiene sentido hacer esperar
+  // al usuario los ~19 000 registros. Se le enseñan al momento y se cambian por
+  // los nuevos cuando termine la descarga de fondo.
+  it('con cache caducado (>24 h) devuelve lo rancio al instante y lo refresca en segundo plano', async () => {
     const { store } = stubLocalStorage(cacheDe([mapRecord(RAW)], CACHE_DURATION + 1000));
     const antes = store.get(CACHE_KEY_TIMESTAMP);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(3) });
     vi.stubGlobal('fetch', fetchMock);
+    const onProgress = vi.fn();
+    const onRefresh = vi.fn<(frescos: Laboratorio[]) => void>();
+    const refrescado = new Promise<Laboratorio[]>((resolve) => onRefresh.mockImplementation(resolve));
 
-    const data = await fetchLaboratorios();
+    const data = await fetchLaboratorios(onProgress, onRefresh);
 
+    expect(data).toHaveLength(1);
+
+    const frescos = await refrescado;
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(data).toHaveLength(3);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(frescos).toHaveLength(3);
     expect(JSON.parse(store.get(CACHE_KEY_DATA) as string)).toHaveLength(3);
     expect(store.get(CACHE_KEY_TIMESTAMP)).not.toBe(antes);
+    // El usuario ya está viendo datos: la descarga de fondo no mueve el spinner.
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  // Si el refresco de fondo falla, el usuario sigue con lo rancio sin enterarse:
+  // ni error, ni aviso, ni un rechazo sin manejar (vitest lo daría por fallo).
+  // El fallo es un timeout porque avanzar el reloj falso deja procesado todo lo
+  // pendiente sin esperas reales.
+  it('si el refresco en segundo plano falla, no avisa, no reporta avance y deja el cache rancio', async () => {
+    vi.useFakeTimers();
+    const semilla = cacheDe([mapRecord(RAW)], CACHE_DURATION + 1000);
+    const { store } = stubLocalStorage(semilla);
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hastaQueAborte(init?.signal));
+    vi.stubGlobal('fetch', fetchMock);
+    const onProgress = vi.fn();
+    const onRefresh = vi.fn();
+
+    const data = await fetchLaboratorios(onProgress, onRefresh);
+
+    expect(data).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(store.get(CACHE_KEY_DATA)).toBe(semilla[CACHE_KEY_DATA]);
+    expect(store.get(CACHE_KEY_TIMESTAMP)).toBe(semilla[CACHE_KEY_TIMESTAMP]);
   });
 
   it('tras una descarga con éxito deja el cache escrito: datos y timestamp', async () => {
@@ -210,6 +293,57 @@ describe('fetchLaboratorios: cache de localStorage', () => {
 
   it('si la red falla y no hay cache que servir, lanza', async () => {
     stubLocalStorage();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+    await expect(fetchLaboratorios()).rejects.toThrow('503');
+  });
+
+  // Un timestamp que no es un número daba NaN, y `NaN >= CACHE_DURATION` es
+  // false: el cache contaba como fresco para siempre y la app no volvía a
+  // descargar nunca. Caducado, los datos siguen valiendo como rancios; la
+  // descarga va en segundo plano, de ahí el vi.waitFor.
+  it('con un timestamp corrupto el cache cuenta como caducado y se vuelve a descargar', async () => {
+    const { store } = stubLocalStorage({ ...cacheDe([mapRecord(RAW)]), [CACHE_KEY_TIMESTAMP]: 'abc' });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(3) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await fetchLaboratorios();
+
+    expect(data).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalled();
+    await vi.waitFor(() => expect(JSON.parse(store.get(CACHE_KEY_DATA) as string)).toHaveLength(3));
+  });
+
+  // Con el reloj del equipo mal puesto el timestamp queda en el futuro, la edad
+  // sale negativa y también pasaba por fresco hasta que el reloj lo alcanzara.
+  it('con un timestamp en el futuro el cache cuenta como caducado y se vuelve a descargar', async () => {
+    const { store } = stubLocalStorage(cacheDe([mapRecord(RAW)], -60 * 60 * 1000));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(3) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await fetchLaboratorios();
+
+    expect(data).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalled();
+    await vi.waitFor(() => expect(JSON.parse(store.get(CACHE_KEY_DATA) as string)).toHaveLength(3));
+  });
+
+  // `JSON.parse(data) as Laboratorio[]` no comprueba nada: un objeto llegaba a
+  // App como si fuera la lista y `data.map` reventaba. Lo que no es un array no
+  // es cache, ni fresco ni rancio.
+  it('si el cache guardado no es un array, descarga como si no hubiera cache', async () => {
+    stubLocalStorage({ [CACHE_KEY_DATA]: '{"a":1}', [CACHE_KEY_TIMESTAMP]: String(Date.now()) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await fetchLaboratorios();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(data).toHaveLength(2);
+  });
+
+  it('si el cache guardado no es un array y la red falla, lanza en vez de servirlo como rancio', async () => {
+    stubLocalStorage({ [CACHE_KEY_DATA]: '{"a":1}', [CACHE_KEY_TIMESTAMP]: String(Date.now() - CACHE_DURATION - 1000) });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
 
     await expect(fetchLaboratorios()).rejects.toThrow('503');
