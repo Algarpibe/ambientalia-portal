@@ -1,4 +1,5 @@
 import type { Laboratorio } from '../types';
+import { sumarMeses } from './fechas';
 
 // Ambientalia vende el Horiba OCMA-500, que mide grasas y aceites por
 // infrarrojo. Quien ya usa infrarrojo es oportunidad de servicio, consumibles o
@@ -148,4 +149,14 @@ export function groupProspects(data: Laboratorio[]): Prospecto[] {
     else porLaboratorio.set(id, [registro]);
   }
   return [...porLaboratorio.values()].map(aProspecto);
+}
+
+// `hoy` llega como argumento para que el resultado no dependa del reloj. El
+// límite es hoy + 6 meses de calendario, ajustado al último día del mes
+// (sumarMeses), y queda fuera: esa fecha ya es «vigente».
+export function estadoVigencia(fecha: string | null, hoy: string): EstadoVigencia {
+  if (fecha === null) return 'sin-fecha';
+  if (fecha < hoy) return 'vencida';
+  if (fecha < sumarMeses(hoy, MESES_DE_AVISO)) return 'pronto';
+  return 'vigente';
 }

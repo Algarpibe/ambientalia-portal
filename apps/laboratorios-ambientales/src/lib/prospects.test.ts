@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Laboratorio } from '../types';
 import { mapRecord } from '../services/api';
-import { esGrasasYAceites, esInfrarrojo, groupProspects } from './prospects';
+import { esGrasasYAceites, esInfrarrojo, estadoVigencia, groupProspects } from './prospects';
 
 // Una fila con la forma real del dataset (como RAW en services/api.test.ts),
 // pasada por mapRecord igual que en la app. Variable, técnica, método, matriz y
@@ -223,5 +223,44 @@ describe('groupProspects', () => {
       const [prospecto] = groupProspects([fila({ hasta: '---' }), fila({ hasta: '---' })]);
       expect(prospecto.vigenciaMasProxima).toBeNull();
     });
+  });
+});
+
+describe('estadoVigencia', () => {
+  // Hoy + 6 meses = 2027-05-26.
+  const HOY = '2026-11-26';
+
+  it('sin fecha', () => {
+    expect(estadoVigencia(null, HOY)).toBe('sin-fecha');
+  });
+
+  it('vencida: anterior a hoy', () => {
+    expect(estadoVigencia('2026-11-25', HOY)).toBe('vencida');
+  });
+
+  it('el mismo día de hoy ya es «pronto», no «vencida» (borde de abajo)', () => {
+    expect(estadoVigencia(HOY, HOY)).toBe('pronto');
+  });
+
+  it('«pronto» llega hasta la víspera de hoy + 6 meses', () => {
+    expect(estadoVigencia('2027-05-25', HOY)).toBe('pronto');
+  });
+
+  it('hoy + 6 meses justo ya es «vigente»: el límite queda fuera (borde de arriba)', () => {
+    expect(estadoVigencia('2027-05-26', HOY)).toBe('vigente');
+  });
+
+  it('más allá, «vigente»', () => {
+    expect(estadoVigencia('2028-01-10', HOY)).toBe('vigente');
+  });
+
+  it('el límite se queda en el último día del mes: el 31 de agosto da el 28 de febrero', () => {
+    expect(estadoVigencia('2027-02-27', '2026-08-31')).toBe('pronto');
+    expect(estadoVigencia('2027-02-28', '2026-08-31')).toBe('vigente');
+  });
+
+  it('y en bisiesto, el 29 de febrero', () => {
+    expect(estadoVigencia('2028-02-28', '2027-08-31')).toBe('pronto');
+    expect(estadoVigencia('2028-02-29', '2027-08-31')).toBe('vigente');
   });
 });
