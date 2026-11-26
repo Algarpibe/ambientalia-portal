@@ -74,6 +74,18 @@ describe('agruparPorNit', () => {
     });
   });
 
+  it('la fecha más reciente gana aunque llegue en la primera fila (la consulta no ordena)', () => {
+    const mapa = agruparPorNit([
+      fila({ nit: '900.000.001-7', ultima_factura: '2026-03-10', ocma_vendido: '2024-05-02', ultimos_repuestos: '2025-08-20' }),
+      fila({ nit: '900000001', ultima_factura: '2025-01-01', ocma_vendido: '2023-02-01', ultimos_repuestos: '2024-12-31' }),
+    ]);
+    expect(mapa.get('900000001')).toEqual({
+      ultimaFactura: '2026-03-10',
+      ocmaVendido: '2024-05-02',
+      ultimosRepuestos: '2025-08-20',
+    });
+  });
+
   it('un contacto sin facturas está en el mapa con las tres fechas a null', () => {
     expect(agruparPorNit([fila()]).get('900000001')).toEqual({
       ultimaFactura: null,
