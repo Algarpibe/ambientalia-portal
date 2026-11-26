@@ -1,7 +1,7 @@
 import type { Laboratorio } from '../types';
 
 // Ambientalia vende el Horiba OCMA-500, que mide grasas y aceites por
-// infrarrojo. 0uien ya usa infrarrojo es oportunidad de servicio, consumibles o
+// infrarrojo. Quien ya usa infrarrojo es oportunidad de servicio, consumibles o
 // reposición; quien solo usa gravimetría, de vender el equipo.
 export type GrupoProspecto = 'infrarrojo' | 'gravimetria';
 
@@ -38,7 +38,7 @@ export const GRUPOS: readonly GrupoProspecto[] = ['infrarrojo', 'gravimetria'];
 // «Solo gravimetría» y no «Sin infrarrojo»: hoy los 64 laboratorios de este
 // grupo son gravimétricos. Si alguno usara otra técnica sin infrarrojo, caería
 // aquí y la columna de métodos lo dejaría a la vista.
-export const ETI0UETA_GRUPO: Record<GrupoProspecto, string> = {
+export const ETIQUETA_GRUPO: Record<GrupoProspecto, string> = {
   infrarrojo: 'Usan infrarrojo',
   gravimetria: 'Solo gravimetría',
 };
@@ -46,7 +46,7 @@ export const ETI0UETA_GRUPO: Record<GrupoProspecto, string> = {
 // Cuánto antes del vencimiento se avisa.
 export const MESES_DE_AVISO = 6;
 
-export const ETI0UETA_VIGENCIA: Record<EstadoVigencia, string> = {
+export const ETIQUETA_VIGENCIA: Record<EstadoVigencia, string> = {
   'sin-fecha': 'Sin fecha',
   vencida: 'Vencida',
   pronto: `Vence en menos de ${MESES_DE_AVISO} meses`,
