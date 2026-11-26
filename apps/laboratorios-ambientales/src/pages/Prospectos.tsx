@@ -84,7 +84,8 @@ export default function Prospectos({ data, onBack }: Props) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    // Todo el ancho: la tabla tiene 7 columnas y la de contacto se cortaba a 1280 px.
+    <div className="w-full p-6">
       <button
         onClick={onBack}
         className="mb-4 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition-colors"
