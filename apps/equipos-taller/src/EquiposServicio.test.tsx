@@ -166,6 +166,16 @@ describe('refresco mientras la pantalla está abierta (cada 60 s, como el Tabler
   afterEach(() => { vi.useRealTimers(); });
   const conFilaExtra = (e: RespuestaEquipos): RespuestaEquipos =>
     ({ ...e, snap: { ...e.snap!, rows: [...e.snap!.rows, fila('18A90009', '2026-10-01', EST.TALLER)] } });
+  // La barra de vistas se pinta antes de que llegue la primera respuesta, con los conteos a 0:
+  // hay que esperar al conteo, no a la barra. Leerlo nada más aparecer la barra era una
+  // carrera que el CI perdía de vez en cuando («0En taller»).
+  const esperarPrimeraCarga = async () => {
+    await chip(/En taller/);
+    await waitFor(() => expect(chipYa(/En taller/).textContent).toBe('1En taller'));
+  };
+  // Como la red: la respuesta llega después del primer pintado. Así la carrera de arriba se
+  // pierde siempre si alguien vuelve a leer el conteo sin esperar, y no solo en un CI lento.
+  const tarde = () => new Promise((r) => setTimeout(r, 20));
 
   it('vuelve a pedir los datos cada 60 s sin cambiar la vista elegida, y deja de pedirlos al cerrarla', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -173,9 +183,9 @@ describe('refresco mientras la pantalla está abierta (cada 60 s, como el Tabler
     const base = api.estado;
     let llamadas = 0;
     let nueva = false;
-    api.estado = async () => { llamadas++; const e = await base(); return nueva ? conFilaExtra(e) : e; };
+    api.estado = async () => { llamadas++; await tarde(); const e = await base(); return nueva ? conFilaExtra(e) : e; };
     const { unmount } = render(<EquiposServicio api={api} />);
-    expect((await chip(/En taller/)).textContent).toBe('1En taller');
+    await esperarPrimeraCarga();
     fireEvent.click(chipYa(/Revisar/));
     nueva = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
@@ -192,9 +202,9 @@ describe('refresco mientras la pantalla está abierta (cada 60 s, como el Tabler
     const { api } = apiFalsa();
     const base = api.estado;
     let falla = false;
-    api.estado = async () => { if (falla) throw new Error('sin conexión'); return base(); };
+    api.estado = async () => { await tarde(); if (falla) throw new Error('sin conexión'); return base(); };
     render(<EquiposServicio api={api} />);
-    expect((await chip(/En taller/)).textContent).toBe('1En taller');
+    await esperarPrimeraCarga();
     falla = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(await screen.findByText('No se pudo cargar: sin conexión')).toBeTruthy();
