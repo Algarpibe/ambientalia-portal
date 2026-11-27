@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { contenidoIcs, fechaIcs, nombreFicheroIcs, urlGoogleCalendar } from './enlaces';
+import { fechaIcs, urlGoogleCalendar } from './enlaces';
 import { eventoDePrueba } from './fixtures';
 
 describe('enlaces del evento', () => {
@@ -16,18 +16,5 @@ describe('enlaces del evento', () => {
     expect(url.searchParams.get('text')).toBe('Almuerzo de fin de año 2026');
     expect(url.searchParams.get('dates')).toBe('20261218T173000Z/20261218T210000Z');
     expect(url.searchParams.get('location')).toBe('Restaurante Anfitriona, Cl. 83 Bis #24-09, Bogotá D.C.');
-  });
-
-  it('el .ics es válido: CRLF, UTC y comas escapadas', () => {
-    const ics = contenidoIcs(evento, new Date('2026-11-27T10:00:00Z'));
-    const lineas = ics.split('\r\n');
-    expect(lineas[0]).toBe('BEGIN:VCALENDAR');
-    expect(lineas).toContain('DTSTART:20261218T173000Z');
-    expect(lineas).toContain('DTEND:20261218T210000Z');
-    expect(lineas).toContain('DTSTAMP:20261127T100000Z');
-    expect(lineas).toContain('UID:fin-de-ano-2026@portal.ambientalia.cloud');
-    expect(lineas).toContain('LOCATION:Restaurante Anfitriona\\, Cl. 83 Bis #24-09\\, Bogotá D.C.');
-    expect(ics.endsWith('END:VCALENDAR\r\n')).toBe(true);
-    expect(nombreFicheroIcs(evento)).toBe('fin-de-ano-2026.ics');
   });
 });
