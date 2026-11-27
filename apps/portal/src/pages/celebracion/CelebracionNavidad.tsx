@@ -12,6 +12,7 @@ import { diaYMes } from './fechas';
 import { ESPECTRO, FUENTE_TEXTO, FUENTE_TITULOS, TITULO_DEGRADADO } from './marca';
 import ModalCualidades from './ModalCualidades';
 import MuroEquipo from './MuroEquipo';
+import PaseDigital from './PaseDigital';
 import { primerNombre } from './persona';
 import Portada from './Portada';
 import TarjetasEvento from './TarjetasEvento';
@@ -222,6 +223,13 @@ export default function CelebracionNavidad() {
               </p>
             )}
             <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />
+            {vista.miRespuesta?.asiste && (
+              <PaseDigital
+                nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
+                evento={evento}
+                respuesta={vista.miRespuesta}
+              />
+            )}
           </Tarjeta>
         </section>
 
