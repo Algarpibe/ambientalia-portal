@@ -11,7 +11,7 @@ export const BOTON_ESPECTRO =
   'w-full rounded-2xl px-6 py-4 text-base font-extrabold text-white shadow-lg transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60';
 
 export const CAMPO =
-  'w-full rounded-xl border-[1.5px] border-[#E6E8EF] bg-white px-3.5 py-3 text-[15px] text-[#1F2229] focus:border-[#006699] focus:outline-none';
+  'w-full rounded-xl border-[1.5px] border-[#E6E8EF] bg-white px-3.5 py-3 text-[15px] text-[#1F2229] focus:border-[#006699] focus:outline-none focus:ring-2 focus:ring-[#006699]/30';
 
 /** Botón de elección (Sí voy / No podré ir). */
 export function opcion(activa: boolean): string {
