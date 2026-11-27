@@ -4,7 +4,7 @@ import { cargarCualidades } from './api';
 import AvatarPersona from './AvatarPersona';
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { FUENTE_TEXTO, FUENTE_TITULOS } from './marca';
-import { entrarPantallaCompleta } from './pantallaCompleta';
+import { admitePantallaCompleta, entrarPantallaCompleta } from './pantallaCompleta';
 import type { Miembro } from './tipos';
 
 interface Props {
@@ -39,7 +39,7 @@ function Hoja({ persona, actual }: { persona: Miembro; actual: boolean }) {
         className="mb-6 h-44 w-44 p-1.5 sm:h-60 sm:w-60 print:h-40 print:w-40 [@media(max-height:820px)]:h-40 [@media(max-height:820px)]:w-40"
         claseIniciales="text-6xl"
       />
-      <h2 className="mb-8 text-4xl font-black text-[#1F2229] sm:text-6xl [@media(max-height:820px)]:text-5xl" style={{ fontFamily: FUENTE_TITULOS }}>
+      <h2 className="mb-8 text-4xl font-black text-[#1F2229] sm:text-6xl [@media(min-width:640px)_and_(max-height:820px)]:text-5xl" style={{ fontFamily: FUENTE_TITULOS }}>
         {persona.nombre}
       </h2>
       {persona.cualidades.length === 0 ? (
@@ -48,7 +48,7 @@ function Hoja({ persona, actual }: { persona: Miembro; actual: boolean }) {
         <>
           <ol aria-label="Top 3" className="mb-8 space-y-3">
             {grandes.map((c) => (
-              <li key={c.cualidad} className="text-3xl font-extrabold text-[#2B2D35] sm:text-5xl [@media(max-height:820px)]:text-4xl" style={{ fontFamily: FUENTE_TITULOS }}>
+              <li key={c.cualidad} className="text-3xl font-extrabold text-[#2B2D35] sm:text-5xl [@media(min-width:640px)_and_(max-height:820px)]:text-4xl" style={{ fontFamily: FUENTE_TITULOS }}>
                 ✨ {c.cualidad} · {c.votos}
               </li>
             ))}
@@ -94,7 +94,7 @@ export default function PresentacionCualidades({ onCerrar }: Props) {
   // Foco y fondo inerte: el resto de la página no se alcanza con el teclado ni con el lector mientras está abierta.
   useEffect(() => {
     const previo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const hermanos = Array.from(document.body.children).filter((el) => el !== capaRef.current && !el.hasAttribute('inert'));
+    const hermanos = Array.from(document.body.children).filter((el) => el !== capaRef.current && !el.hasAttribute('data-presentacion-cualidades') && !el.hasAttribute('inert'));
     hermanos.forEach((el) => el.setAttribute('inert', ''));
     capaRef.current?.focus();
     return () => {
@@ -153,9 +153,11 @@ export default function PresentacionCualidades({ onCerrar }: Props) {
           <button type="button" className={BOTON} disabled={!listo || indice >= total - 1} onClick={() => mover(1)}>
             Siguiente <span aria-hidden="true">→</span>
           </button>
-          <button type="button" className={BOTON} onClick={entrarPantallaCompleta}>
-            ⛶ Pantalla completa
-          </button>
+          {admitePantallaCompleta() && (
+            <button type="button" className={BOTON} onClick={entrarPantallaCompleta}>
+              <span aria-hidden="true">⛶</span> Pantalla completa
+            </button>
+          )}
           <button type="button" className={BOTON} disabled={!listo} onClick={() => window.print()}>
             🖨️ Imprimir
           </button>

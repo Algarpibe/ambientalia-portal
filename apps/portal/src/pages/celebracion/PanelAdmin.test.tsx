@@ -15,7 +15,11 @@ vi.mock('./api', async (importOriginal) => ({
   readmitirInvitado: vi.fn(),
 }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
-vi.mock('./pantallaCompleta', () => ({ entrarPantallaCompleta: vi.fn(), salirPantallaCompleta: vi.fn() }));
+vi.mock('./pantallaCompleta', () => ({
+  admitePantallaCompleta: () => true,
+  entrarPantallaCompleta: vi.fn(),
+  salirPantallaCompleta: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();

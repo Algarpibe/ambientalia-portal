@@ -2,6 +2,11 @@
 // gesto del usuario (el clic de «Presentar cualidades»). El iPhone no trae la API: entonces no se hace nada y
 // basta la capa fija de la presentación.
 
+/** Si el navegador trae la API; el iPhone no. */
+export function admitePantallaCompleta(): boolean {
+  return typeof document.documentElement.requestFullscreen === 'function';
+}
+
 /** Pide la pantalla completa de toda la página; sin la API, o si el navegador la niega, no pasa nada. */
 export function entrarPantallaCompleta(): void {
   const raiz = document.documentElement;

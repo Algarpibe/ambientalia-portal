@@ -51,11 +51,11 @@ export default function PanelAdmin({ evento, version, yo, onCambio }: Props) {
     setPresentando(true);
   };
 
-  // Si el panel se desmonta con la presentación abierta (otra pestaña, cerrar sesión): la guarda no hace nada
+  // Si el panel se desmonta con la presentación abierta (cambiar de ruta, pulsar «Atrás» o cerrar sesión): la guarda no hace nada
   // sin pantalla completa, así que es segura con StrictMode.
   useEffect(() => () => salirPantallaCompleta(), []);
 
-  // Se sale aquí y no al desmontar: con StrictMode, en desarrollo, saldría nada más entrar (decisión P3).
+  // Se sale aquí y no al desmontar la presentación: con StrictMode, en desarrollo, saldría nada más entrar (decisión P3).
   const cerrarPresentacion = useCallback(() => {
     salirPantallaCompleta();
     setPresentando(false);

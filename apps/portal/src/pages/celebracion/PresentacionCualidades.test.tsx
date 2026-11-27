@@ -120,6 +120,12 @@ describe('PresentacionCualidades', () => {
     }
   });
 
+  it('sin la API de pantalla completa (iPhone) no pinta el botón «Pantalla completa»', async () => {
+    pintar();
+    await screen.findByRole('heading', { name: 'Ana Ruiz' });
+    expect(screen.queryByRole('button', { name: /Pantalla completa/ })).toBeNull();
+  });
+
   it('PageDown y PageUp mueven como los mandos de presentación; con Alt, Ctrl o Meta no se mueve', async () => {
     pintar();
     await screen.findByRole('heading', { name: 'Ana Ruiz' });
