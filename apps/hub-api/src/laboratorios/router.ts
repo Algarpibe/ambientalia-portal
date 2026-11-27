@@ -1,15 +1,19 @@
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { requireAuth, requireApp } from '../auth.js';
+import rateLimit from 'express-rate-limit';
+import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { cached } from '../cache.js';
 import { leerHechosZoho, nitBase, type HechosZoho } from './clientes.js';
 
 const APP_ID = 'laboratorios-ambientales';
-const CACHE_KEY = 'laboratorios:clientes';
+export const CLAVE_CACHE = 'laboratorios:clientes';
 
-/** Tope de NIT por petición. La app envía unos 85. */
-export const MAX_NITS = 500;
+/** Tope de NIT por petición. La app envía unos 85; con el límite por usuario, deja el barrido en unos 750 NIT por minuto. */
+export const MAX_NITS = 150;
+
+// Por usuario: la app hace una petición al abrir la vista y otra por cada «Reintentar».
+export const LIMITE_CLIENTES = { windowMs: 60_000, max: 5 } as const;
 
 export interface ClienteZoho extends HechosZoho {
   nit: string;
@@ -43,16 +47,26 @@ export function leerNits(cuerpo: unknown): string[] | null {
 /**
  * Cruce de los prospectos de la app de Laboratorios ambientales con Zoho Books.
  * El cruce completo se calcula una vez y se cachea, pero cada respuesta lleva
- * solo los NIT pedidos: desde aquí no se puede sacar la lista de clientes.
+ * solo los NIT pedidos. El servidor no sabe qué NIT son prospectos: el freno al
+ * barrido es el volumen, MAX_NITS por petición y LIMITE_CLIENTES por usuario.
  */
 export function createLaboratoriosRouter(db: Pool): Router {
   const router = Router();
 
-  router.post('/laboratorios/clientes', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
-    const nits = leerNits(req.body);
-    if (nits === null) return void res.status(400).json({ error: 'nits inválidos' });
+  // Va detrás de requireAuth: la clave es el usuario, no la IP (el límite global de /api/ es por IP).
+  const limite = rateLimit({
+    ...LIMITE_CLIENTES,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'too_many_requests' },
+    keyGenerator: (req) => String(getPayload(req)?.user_id ?? req.ip ?? 'anonimo'),
+  });
+
+  router.post('/laboratorios/clientes', requireAuth, requireApp(APP_ID), limite, async (req: Request, res: Response) => {
     try {
-      const hechos = await cached(CACHE_KEY, () => leerHechosZoho(db));
+      const nits = leerNits(req.body);
+      if (nits === null) return void res.status(400).json({ error: 'nits inválidos' });
+      const hechos = await cached(CLAVE_CACHE, () => leerHechosZoho(db));
       const clientes: ClienteZoho[] = [];
       for (const nit of nits) {
         const h = hechos.get(nit);
