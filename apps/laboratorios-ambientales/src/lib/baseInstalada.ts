@@ -1,6 +1,10 @@
 // Base instalada de aire: un equipo por código de laboratorio + número de serie,
 // sacado del dataset 2waz-acaa. Ver
 // docs/superpowers/specs/2026-11-27-base-instalada-aire-design.md.
+import type { Laboratorio } from '../types';
+import { extractEquipment } from './equipment';
+import { fechaDeHasta } from './fechas';
+import { distintos } from './prospects';
 
 // Los rellenos que el dataset escribe cuando no hay dato.
 const RELLENOS = new Set(['no aplica', 'n/a', 'na']);
@@ -26,4 +30,167 @@ export function separarSeries(campo: string): string[] {
     .split(/[,;\r\n]/)
     .map((trozo) => trozo.trim())
     .filter((trozo) => !esValorVacio(trozo));
+}
+
+// Los dos componentes del aire que traen equipos con número de serie: los
+// literales que da normalizeComponente para cualquier grafía del dataset.
+const COMPONENTES_CON_EQUIPOS = new Set(['Calidad del Aire', 'Olores Ofensivos']);
+
+export const SIN_ESTACION = 'Sin estación';
+export const SIN_IDENTIFICAR = 'Sin identificar';
+
+export type MarcaModelo = { marca: string; modelo: string };
+
+// Un equipo: la pareja código de laboratorio + serie, con todas sus filas.
+export type EquipoInstalado = {
+  codigo: string;
+  laboratorio: string;
+  nit: string;
+  ciudad: string;
+  departamento: string;
+  contacto: string;
+  telefono: string;
+  correo: string;
+  // Tal como aparece la primera vez.
+  serie: string;
+  // Distintas y ordenadas; vacía = «Sin estación».
+  estaciones: string[];
+  // Los pares distintos que reconoce extractEquipment, ordenados; vacía = «Sin identificar».
+  marcasYModelos: MarcaModelo[];
+  // Los códigos EPA distintos que citan sus métodos, reconocidos o no, ordenados.
+  codigosEpa: string[];
+  // Distintas y ordenadas.
+  variables: string[];
+  // AAAA-MM-DD, o null si ninguna fila trae una fecha válida.
+  vigenciaMasProxima: string | null;
+};
+
+export function esRegistroDeEquipoAire(
+  registro: Pick<Laboratorio, 'estado' | 'matriz' | 'componente' | 'serie'>,
+): boolean {
+  return (
+    registro.estado === 'Activa' &&
+    registro.matriz === 'Aire' &&
+    COMPONENTES_CON_EQUIPOS.has(registro.componente) &&
+    separarSeries(registro.serie ?? '').length > 0
+  );
+}
+
+// Un código de designación EPA: casi siempre «RFPS-0202-141», a veces con
+// espacios en vez de guiones («EQPM 0311-195», «RFPS- 0202-141»). Sin \b al
+// final a propósito: el dataset escribe una vez «RFNA-1289-0704», que así cuenta
+// como RFNA-1289-070, un código que no está en la lista de la EPA.
+const CODIGO_EPA = /\b(RF|EQ)([A-Z]{2})[\s-]*(\d{4})[\s-]*(\d{3})/g;
+
+// El método con sus códigos EPA escritos con guiones: extractEquipment busca el
+// código como subcadena y, si no, no reconocería «EQPM 0311-195».
+export function normalizarCodigosEpa(metodo: string): string {
+  return metodo.replace(CODIGO_EPA, '$1$2-$3-$4');
+}
+
+// Los códigos EPA que cita un método, con guiones y sin repetir.
+export function codigosEpa(metodo: string): string[] {
+  return [...new Set(normalizarCodigosEpa(metodo).match(CODIGO_EPA) ?? [])];
+}
+
+const compararTexto = (a: string, b: string): number => a.localeCompare(b, 'es');
+
+// Sin código de laboratorio, por nombre, como en Prospectos. Los prefijos
+// impiden que un nombre choque con un código.
+function idLaboratorio(codigo: string, nombre: string): string {
+  return codigo ? `codigo:${codigo}` : `nombre:${nombre}`;
+}
+
+// Los datos de la ficha que salen de la primera fila con valor.
+type CampoDeFicha = 'codigo' | 'nombreLaboratorio' | 'nit' | 'ciudad' | 'departamento' | 'contacto' | 'telefono' | 'correo';
+
+function aEquipo(filas: Laboratorio[], serie: string): EquipoInstalado {
+  // El primer valor no vacío en el orden del dataset, como en Prospectos, pero
+  // con esValorVacio: un «No aplica» en una fila no tapa el dato de otra.
+  const primero = (campo: CampoDeFicha): string => {
+    for (const fila of filas) {
+      const valor = fila[campo].trim();
+      if (!esValorVacio(valor)) return valor;
+    }
+    return '';
+  };
+
+  const pares = new Map<string, MarcaModelo>();
+  const codigos = new Set<string>();
+  for (const fila of filas) {
+    const identificado = extractEquipment(normalizarCodigosEpa(fila.metodo));
+    if (identificado) {
+      pares.set(`${identificado.brand}\n${identificado.model}`, {
+        marca: identificado.brand,
+        modelo: identificado.model,
+      });
+    }
+    for (const codigo of codigosEpa(fila.metodo)) codigos.add(codigo);
+  }
+
+  // AAAA-MM-DD se ordena bien como texto: tras el sort, la primera es la más temprana.
+  const fechas = filas
+    .map((fila) => fechaDeHasta(fila.hasta))
+    .filter((fecha): fecha is string => fecha !== null)
+    .sort();
+
+  return {
+    codigo: primero('codigo'),
+    laboratorio: primero('nombreLaboratorio'),
+    nit: primero('nit'),
+    ciudad: primero('ciudad'),
+    departamento: primero('departamento'),
+    contacto: primero('contacto'),
+    telefono: primero('telefono'),
+    correo: primero('correo'),
+    serie,
+    estaciones: distintos(filas.map((fila) => fila.estacion ?? '')),
+    marcasYModelos: [...pares.values()].sort(
+      (a, b) => compararTexto(a.marca, b.marca) || compararTexto(a.modelo, b.modelo),
+    ),
+    codigosEpa: [...codigos].sort(),
+    variables: distintos(filas.map((fila) => fila.variable)),
+    vigenciaMasProxima: fechas[0] ?? null,
+  };
+}
+
+/**
+ * Un equipo por pareja código de laboratorio + serie (la serie, en mayúsculas
+ * para comparar). Solo entran los registros de esRegistroDeEquipoAire. El Map
+ * conserva el orden del dataset: el de la pantalla lo pone ordenarEquipos.
+ */
+export function agruparEquipos(data: Laboratorio[]): EquipoInstalado[] {
+  const grupos = new Map<string, { filas: Laboratorio[]; serie: string }>();
+  for (const registro of data) {
+    if (!esRegistroDeEquipoAire(registro)) continue;
+    const laboratorio = idLaboratorio(registro.codigo.trim(), registro.nombreLaboratorio.trim());
+    for (const serie of separarSeries(registro.serie ?? '')) {
+      // Un salto de línea nunca va dentro de una serie: separarSeries parte por él.
+      const id = `${laboratorio}\n${serie.toUpperCase()}`;
+      const grupo = grupos.get(id);
+      if (grupo) grupo.filas.push(registro);
+      else grupos.set(id, { filas: [registro], serie });
+    }
+  }
+  return [...grupos.values()].map(({ filas, serie }) => aEquipo(filas, serie));
+}
+
+// «Sin estación» va al final de su laboratorio.
+function compararEstacion(a: EquipoInstalado, b: EquipoInstalado): number {
+  const sinA = a.estaciones.length === 0;
+  const sinB = b.estaciones.length === 0;
+  if (sinA || sinB) return Number(sinA) - Number(sinB);
+  return compararTexto(a.estaciones[0], b.estaciones[0]);
+}
+
+/** Por departamento, ciudad, laboratorio, estación y serie. Devuelve una lista nueva. */
+export function ordenarEquipos(equipos: EquipoInstalado[]): EquipoInstalado[] {
+  return [...equipos].sort(
+    (a, b) =>
+      compararTexto(a.departamento, b.departamento) ||
+      compararTexto(a.ciudad, b.ciudad) ||
+      compararTexto(a.laboratorio, b.laboratorio) ||
+      compararEstacion(a, b) ||
+      compararTexto(a.serie, b.serie),
+  );
 }
