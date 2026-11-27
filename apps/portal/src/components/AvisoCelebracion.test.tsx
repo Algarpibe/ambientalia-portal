@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AvisoCelebracion from './AvisoCelebracion';
 import { cargarMiEstado } from '../pages/celebracion/api';
@@ -28,19 +28,15 @@ describe('AvisoCelebracion', () => {
     expect(enlace.getAttribute('href')).toBe('/celebracion-navidad-2026');
   });
 
-  it('no sale si ya respondió, si ya cerró o si falla la consulta', async () => {
-    for (const preparar of [
-      () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: true, confirmacionesAbiertas: true }),
-      () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: false, confirmacionesAbiertas: false }),
-      () => vi.mocked(cargarMiEstado).mockRejectedValue(new Error('red')),
-    ]) {
-      preparar();
-      pintar();
-      await waitFor(() => expect(cargarMiEstado).toHaveBeenCalled());
-      await Promise.resolve();
-      expect(screen.queryByRole('link')).toBeNull();
-      cleanup();
-      vi.mocked(cargarMiEstado).mockReset();
-    }
+  it.each([
+    ['ya respondió', () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: true, confirmacionesAbiertas: true })],
+    ['ya cerró', () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: false, confirmacionesAbiertas: false })],
+    ['falla la consulta', () => vi.mocked(cargarMiEstado).mockRejectedValue(new Error('red'))],
+  ])('no sale si %s', async (_caso, preparar) => {
+    preparar();
+    pintar();
+    await waitFor(() => expect(cargarMiEstado).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole('link')).toBeNull();
   });
 });

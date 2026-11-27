@@ -87,4 +87,10 @@ describe('api de la invitación', () => {
     expect(mensajeDeError(new ErrorApi('raro', 500))).toBe('No se pudo guardar. Vuelve a intentarlo.');
     expect(mensajeDeError(new Error('red'))).toBe('No se pudo guardar. Vuelve a intentarlo.');
   });
+
+  it('mensajeDeError avisa del límite de peticiones (429)', () => {
+    expect(mensajeDeError(new ErrorApi('error', 429))).toBe(
+      'Demasiadas peticiones a la vez. Espera un momento y vuelve a intentarlo.',
+    );
+  });
 });

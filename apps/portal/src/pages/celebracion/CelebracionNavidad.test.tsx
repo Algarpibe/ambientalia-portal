@@ -73,11 +73,20 @@ describe('CelebracionNavidad', () => {
   });
 
   it('si el servidor rechaza, avisa con el texto de su código', async () => {
+    vi.mocked(guardarConfirmacion).mockRejectedValue(new ErrorApi('preferencia_invalida', 400));
+    await abrir();
+    fireEvent.click(screen.getByRole('button', { name: /No podré ir/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar respuesta/ }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('Elige una preferencia de menú.', 'error'));
+    expect(cargarVista).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el cierre llegó mientras tanto (409), avisa y recarga la vista', async () => {
     vi.mocked(guardarConfirmacion).mockRejectedValue(new ErrorApi('confirmaciones_cerradas', 409));
     await abrir();
     fireEvent.click(screen.getByRole('button', { name: /No podré ir/ }));
     fireEvent.click(screen.getByRole('button', { name: /Confirmar respuesta/ }));
     await waitFor(() => expect(notify).toHaveBeenCalledWith('Las confirmaciones ya están cerradas.', 'error'));
-    expect(cargarVista).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
   });
 });
