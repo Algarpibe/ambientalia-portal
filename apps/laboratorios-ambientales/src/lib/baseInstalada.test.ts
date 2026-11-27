@@ -7,6 +7,7 @@ import {
   codigosEpa,
   esRegistroDeEquipoAire,
   esValorVacio,
+  normalizarCodigosEpa,
   ordenarEquipos,
   separarSeries,
 } from './baseInstalada';
@@ -52,6 +53,20 @@ describe('separarSeries', () => {
   it('no parte por «/» ni por espacios', () => {
     expect(separarSeries('XY-12345-678/2')).toEqual(['XY-12345-678/2']);
     expect(separarSeries('AB 1234')).toEqual(['AB 1234']);
+  });
+
+  it('parte por guion o «/» con espacio en al menos un lado', () => {
+    expect(separarSeries('1001 - 1002  -  1003')).toEqual(['1001', '1002', '1003']);
+    expect(separarSeries('2001 -2002')).toEqual(['2001', '2002']);
+    expect(separarSeries('3001- 3002')).toEqual(['3001', '3002']);
+    expect(separarSeries('4001 / 4002')).toEqual(['4001', '4002']);
+    expect(separarSeries('5001 – 5002')).toEqual(['5001', '5002']);
+    expect(separarSeries('5003 — 5004')).toEqual(['5003', '5004']);
+    expect(separarSeries('SN-0001 (AB12) -  SN-0002 (AB12)')).toEqual(['SN-0001 (AB12)', 'SN-0002 (AB12)']);
+  });
+
+  it('guion y «/» pegados por los dos lados se quedan dentro de la serie', () => {
+    expect(separarSeries('43c-00000-000/2')).toEqual(['43c-00000-000/2']);
   });
 
   it('descarta los trozos vacíos', () => {
@@ -168,6 +183,19 @@ describe('codigosEpa', () => {
   });
 });
 
+describe('normalizarCodigosEpa', () => {
+  it('pasa a guiones los códigos con espacios', () => {
+    expect(normalizarCodigosEpa('Apéndice L. EQPM 0311-195')).toBe('Apéndice L. EQPM-0311-195');
+    expect(normalizarCodigosEpa('RFPS- 0202-141')).toBe('RFPS-0202-141');
+  });
+
+  it('deja intacto el texto que no es un código EPA', () => {
+    for (const texto of ['Método 5 - 10 ppm', 'NTC 3362 C', 'SM 2320 B', 'Norma UNE-EN 16450', '']) {
+      expect(normalizarCodigosEpa(texto), texto).toBe(texto);
+    }
+  });
+});
+
 describe('agruparEquipos', () => {
   it('arma la ficha de un equipo a partir de su fila', () => {
     expect(agruparEquipos([fila()])).toEqual([
@@ -280,6 +308,18 @@ describe('agruparEquipos', () => {
     expect(ficha.telefono).toBe('6070000002');
   });
 
+  it('sin código de laboratorio se agrupa por nombre', () => {
+    const sinCodigo = { c_digo_de_laboratorio: '' };
+    const mismoNombre = agruparEquipos([fila(sinCodigo), fila({ ...sinCodigo, variable: 'Partículas Suspendidas Totales' })]);
+    expect(mismoNombre).toHaveLength(1);
+    expect(mismoNombre[0].codigo).toBe('');
+    const otroNombre = agruparEquipos([
+      fila(sinCodigo),
+      fila({ ...sinCodigo, nombre_del_laboratorio: 'LABORATORIO DEL SUR LTDA.' }),
+    ]);
+    expect(otroNombre).toHaveLength(2);
+  });
+
   it('deja fuera lo que no es un equipo de aire', () => {
     expect(
       agruparEquipos([
@@ -310,6 +350,16 @@ describe('ordenarEquipos', () => {
       equipo({ serie: 'Y', estaciones: ['Zona Industrial'] }),
     ]);
     expect(series(ordenados)).toEqual(['Y', 'X']);
+  });
+
+  it('dos laboratorios con el mismo nombre no se mezclan: desempata el código', () => {
+    const ordenados = ordenarEquipos([
+      equipo({ serie: 'A', codigo: '202', estaciones: ['Centro'] }),
+      equipo({ serie: 'B', codigo: '201', estaciones: ['Norte'] }),
+      equipo({ serie: 'C', codigo: '202', estaciones: ['Norte'] }),
+      equipo({ serie: 'D', codigo: '201', estaciones: ['Centro'] }),
+    ]);
+    expect(series(ordenados)).toEqual(['D', 'B', 'A', 'C']);
   });
 
   it('no toca la lista recibida', () => {

@@ -19,15 +19,21 @@ export function esValorVacio(texto: string): boolean {
   return limpio === '' || /^[-–—]+$/.test(limpio) || RELLENOS.has(limpio);
 }
 
+// Separadores de series: coma, punto y coma y salto de línea; y también un
+// guion, raya o «/» con un espacio al menos en un lado.
+const SEPARADOR_DE_SERIES = /[,;\r\n]|\s[-–—/]|[-–—/]\s/;
+
 /**
  * Las series de un campo de equipo: una fila puede listar varias (una red con
- * 30 muestreadores). Se parte por comas, puntos y comas y saltos de línea; no
- * por «/» ni por espacios, porque hay series como «XY-12345-678/2». Los trozos
- * vacíos (según esValorVacio) se descartan.
+ * 30 muestreadores). Se parte por comas, puntos y comas y saltos de línea, y por
+ * un guion, raya (–, —) o «/» con espacio en al menos un lado («1001 - 1002»,
+ * «2001 -2002»). Un guion o «/» pegado por los dos lados es parte de la serie
+ * («XY-12345-678/2»); tampoco se parte por los espacios solos. Los trozos se
+ * recortan y los vacíos (según esValorVacio) se descartan.
  */
 export function separarSeries(campo: string): string[] {
   return campo
-    .split(/[,;\r\n]/)
+    .split(SEPARADOR_DE_SERIES)
     .map((trozo) => trozo.trim())
     .filter((trozo) => !esValorVacio(trozo));
 }
@@ -183,13 +189,14 @@ function compararEstacion(a: EquipoInstalado, b: EquipoInstalado): number {
   return compararTexto(a.estaciones[0], b.estaciones[0]);
 }
 
-/** Por departamento, ciudad, laboratorio, estación y serie. Devuelve una lista nueva. */
+/** Por departamento, ciudad, laboratorio, código, estación y serie. Devuelve una lista nueva. */
 export function ordenarEquipos(equipos: EquipoInstalado[]): EquipoInstalado[] {
   return [...equipos].sort(
     (a, b) =>
       compararTexto(a.departamento, b.departamento) ||
       compararTexto(a.ciudad, b.ciudad) ||
       compararTexto(a.laboratorio, b.laboratorio) ||
+      compararTexto(a.codigo, b.codigo) ||
       compararEstacion(a, b) ||
       compararTexto(a.serie, b.serie),
   );
