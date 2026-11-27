@@ -3,6 +3,7 @@ import {
   CelebracionError,
   confirmacionesAbiertas,
   esUuid,
+  ordenarCualidades,
   parseConfirmacion,
   parseCualidades,
   parseFoto,
@@ -91,6 +92,11 @@ export interface Vista {
   cualidadesOcultas: boolean;
 }
 
+/** GET /celebracion/cualidades (solo admin): los invitados, con TODAS sus cualidades y no solo el top 3. */
+export interface CualidadesEquipo {
+  equipo: MiembroVista[];
+}
+
 export interface MiEstado {
   respondido: boolean;
   confirmacionesAbiertas: boolean;
@@ -119,6 +125,17 @@ export interface Resumen {
 export interface CelebracionDeps {
   store: CelebracionStore;
   now: () => Date;
+}
+
+/** Los conteos de cada votado, para buscarlos por su userId. */
+function agruparPorVotado(conteos: readonly ConteoVotos[]): Map<string, CualidadVotada[]> {
+  const porVotado = new Map<string, CualidadVotada[]>();
+  for (const c of conteos) {
+    const lista = porVotado.get(c.votadoId) ?? [];
+    lista.push({ cualidad: c.cualidad, votos: c.votos });
+    porVotado.set(c.votadoId, lista);
+  }
+  return porVotado;
 }
 
 /** Casos de uso de la invitación. El reloj se inyecta: los cierres se prueban sin esperar a diciembre. */
@@ -158,12 +175,7 @@ export class CelebracionService {
     const fotoDe = new Map(fotos.map((f) => [f.userId.toLowerCase(), f.foto] as const));
     if (excluidos.has(sesion.userId.toLowerCase())) throw new CelebracionError('no_invitado');
 
-    const porVotado = new Map<string, CualidadVotada[]>();
-    for (const c of conteos) {
-      const lista = porVotado.get(c.votadoId) ?? [];
-      lista.push({ cualidad: c.cualidad, votos: c.votos });
-      porVotado.set(c.votadoId, lista);
-    }
+    const porVotado = agruparPorVotado(conteos);
 
     const misVotos: Record<string, string[]> = {};
     for (const v of mios) {
@@ -305,6 +317,27 @@ export class CelebracionService {
       excluidos: todos
         .filter((m) => excluidos.has(m.userId.toLowerCase()))
         .map((m) => ({ userId: m.userId, nombre: m.nombre })),
+    };
+  }
+
+  /**
+   * Para la presentación del admin (el router exige admin): cada invitado, en el orden del equipo, con TODAS las
+   * cualidades que recibió. Solo conteos, nunca quién votó; cuentan los mismos votos que en el muro.
+   */
+  async cualidadesEquipo(): Promise<CualidadesEquipo> {
+    const [{ equipo }, conteos, fotos] = await Promise.all([
+      this.invitados(),
+      this.store.contarVotos(EVENTO.id),
+      this.store.listarFotos(EVENTO.id),
+    ]);
+    const porVotado = agruparPorVotado(conteos);
+    const fotoDe = new Map(fotos.map((f) => [f.userId.toLowerCase(), f.foto] as const));
+    return {
+      equipo: equipo.map((m) => ({
+        ...m,
+        cualidades: ordenarCualidades(porVotado.get(m.userId) ?? []),
+        foto: fotoDe.get(m.userId.toLowerCase()) ?? null,
+      })),
     };
   }
 }
