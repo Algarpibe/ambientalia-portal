@@ -159,7 +159,8 @@ comando SQL completo que se le pasa al usuario:
 
 ## Errores
 
-- hub-api: 400 con cuerpo inválido, 401 sin sesión, 403 sin la app, 500 si
+- hub-api: 400 con cuerpo inválido, 401 sin sesión, 403 sin la app, 429 por
+  encima de 5 peticiones por minuto del mismo usuario, 500 si
   falla la réplica, con el `errorEnJson` habitual.
 - La app trata todo fallo igual (aviso y reintento). La vista nunca se cae por
   Zoho.
@@ -177,10 +178,12 @@ es público).
   reciente de cada tipo; un contacto sin facturas da las tres fechas `null`; los
   NIT de relleno no aparecen.
 - Router con un pool falso: 401 sin token; 403 con un usuario sin la app; 200 con
-  un admin sin la app asignada; 400 con un cuerpo que no es una lista, con 501
+  un admin sin la app asignada; 400 con un cuerpo que no es una lista, con 151
   NIT y con un NIT inválido; el 200 devuelve solo los NIT pedidos y cada objeto
-  tiene exactamente los cuatro campos; la segunda llamada no vuelve a consultar
-  el pool.
+  tiene exactamente los cuatro campos (con la caché sembrada con campos de más);
+  la segunda llamada no vuelve a consultar el pool; la sexta petición en un
+  minuto da 429, otro usuario no lo nota y un 403 del mismo usuario no gasta
+  cupo.
 - La consulta SQL no tiene prueba con BD (el arnés de hub-api no crea el
   esquema `books`): se verifica contra la réplica como se indica arriba.
 
