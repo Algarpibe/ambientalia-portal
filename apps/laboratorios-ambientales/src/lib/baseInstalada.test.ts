@@ -121,6 +121,7 @@ const GRIMM = { marca: 'Grimm', modelo: 'EDM180' };
 // Un equipo ya armado, para probar el orden y los filtros sin pasar por
 // agruparEquipos. Datos ficticios.
 const equipo = (over: Partial<EquipoInstalado> = {}): EquipoInstalado => ({
+  id: 'codigo:201\nSN-0001',
   codigo: '201',
   laboratorio: 'LABORATORIO DE AIRE DEL NORTE S.A.S.',
   nit: '900.000.001-7',
@@ -207,6 +208,7 @@ describe('agruparEquipos', () => {
   it('arma la ficha de un equipo a partir de su fila', () => {
     expect(agruparEquipos([fila()])).toEqual([
       {
+        id: 'codigo:201\nSN-0001',
         codigo: '201',
         laboratorio: 'LABORATORIO DE AIRE DEL NORTE S.A.S.',
         nit: '900.000.001-7',
@@ -246,6 +248,29 @@ describe('agruparEquipos', () => {
       ['201', 'SN-0001'],
       ['202', 'SN-0001'],
     ]);
+  });
+
+  it('el id es único por equipo y estable para la misma entrada', () => {
+    const entrada = [
+      fila({ c_digo_de_laboratorio: '201', identificaci_n_de_equipo: 'SN-0001' }),
+      fila({ c_digo_de_laboratorio: '202', nombre_del_laboratorio: 'LABORATORIO DEL SUR LTDA.' }),
+      fila({ c_digo_de_laboratorio: '201', identificaci_n_de_equipo: 'SN-0002' }),
+      fila({ c_digo_de_laboratorio: '', nombre_del_laboratorio: 'LABORATORIO SIN CODIGO', identificaci_n_de_equipo: 'SN-0001' }),
+      fila({ c_digo_de_laboratorio: 'N/A', nombre_del_laboratorio: 'OTRO SIN CODIGO', identificaci_n_de_equipo: 'SN-0001' }),
+    ];
+    const ids = agruparEquipos(entrada).map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThanOrEqual(4);
+    expect(agruparEquipos(entrada).map((e) => e.id)).toEqual(ids);
+  });
+
+  it('la misma serie en dos laboratorios tiene dos id distintos', () => {
+    const [a, b] = agruparEquipos([
+      fila({ c_digo_de_laboratorio: '201' }),
+      fila({ c_digo_de_laboratorio: '202', nombre_del_laboratorio: 'LABORATORIO DEL SUR LTDA.' }),
+    ]);
+    expect(a.serie).toBe(b.serie);
+    expect(a.id).not.toBe(b.id);
   });
 
   it('una fila con varias series da un equipo por serie', () => {

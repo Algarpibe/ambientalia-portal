@@ -9,6 +9,7 @@ const HOY = '2026-11-27';
 
 // Datos ficticios: el repo es público. Las marcas y los códigos son reales.
 const equipo = (over: Partial<EquipoInstalado> = {}): EquipoInstalado => ({
+  id: 'codigo:201\nSN-0001',
   codigo: '201',
   laboratorio: 'LABORATORIO DE AIRE DEL NORTE S.A.S.',
   nit: '900.000.001-7',

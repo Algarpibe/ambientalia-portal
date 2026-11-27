@@ -51,6 +51,10 @@ export type MarcaModelo = { marca: string; modelo: string };
 
 // Un equipo: la pareja código de laboratorio + serie, con todas sus filas.
 export type EquipoInstalado = {
+  // La clave del agrupado (laboratorio + serie en mayúsculas): única por equipo
+  // y estable. Sirve de key en la tabla; `codigo` puede salir vacío aunque el
+  // dato crudo no lo fuera.
+  id: string;
   codigo: string;
   laboratorio: string;
   nit: string;
@@ -112,7 +116,7 @@ function idLaboratorio(codigo: string, nombre: string): string {
 // Los datos de la ficha que salen de la primera fila con valor.
 type CampoDeFicha = 'codigo' | 'nombreLaboratorio' | 'nit' | 'ciudad' | 'departamento' | 'contacto' | 'telefono' | 'correo';
 
-function aEquipo(filas: Laboratorio[], serie: string): EquipoInstalado {
+function aEquipo(id: string, filas: Laboratorio[], serie: string): EquipoInstalado {
   // El primer valor no vacío en el orden del dataset, como en Prospectos, pero
   // con esValorVacio: un «No aplica» en una fila no tapa el dato de otra.
   const primero = (campo: CampoDeFicha): string => {
@@ -143,6 +147,7 @@ function aEquipo(filas: Laboratorio[], serie: string): EquipoInstalado {
     .sort();
 
   return {
+    id,
     codigo: primero('codigo'),
     laboratorio: primero('nombreLaboratorio'),
     nit: primero('nit'),
@@ -180,7 +185,7 @@ export function agruparEquipos(data: Laboratorio[]): EquipoInstalado[] {
       else grupos.set(id, { filas: [registro], serie });
     }
   }
-  return [...grupos.values()].map(({ filas, serie }) => aEquipo(filas, serie));
+  return [...grupos].map(([id, { filas, serie }]) => aEquipo(id, filas, serie));
 }
 
 // «Sin estación» va al final de su laboratorio.

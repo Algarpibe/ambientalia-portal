@@ -1,8 +1,8 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useMemo, useState } from 'react';
 import type { Laboratorio } from '../types';
 import type { EstadoVigencia } from '../lib/prospects';
 import { ETIQUETA_VIGENCIA, estadoVigencia } from '../lib/prospects';
-import type { FiltrosEquipos } from '../lib/baseInstalada';
+import type { EquipoInstalado, FiltrosEquipos } from '../lib/baseInstalada';
 import {
   FILTROS_VACIOS,
   SIN_ESTACION,
@@ -15,7 +15,7 @@ import {
 } from '../lib/baseInstalada';
 import { HOJA_EXCEL, filasExcel, nombreDeFichero } from '../lib/exportBaseInstalada';
 import { hoyLocal } from '../lib/fechas';
-import type { EstadoCliente } from '../lib/clientes';
+import type { CruceZoho, EstadoCliente, EstadoCruce } from '../lib/clientes';
 import { ESTADOS_CLIENTE, ETIQUETA_ESTADO_CLIENTE, nitsParaConsultar } from '../lib/clientes';
 import { useCruceZoho } from '../hooks/useCruceZoho';
 import CeldaCliente from '../components/CeldaCliente';
@@ -262,6 +262,27 @@ export default function BaseInstalada({ data, onBack }: Props) {
         </p>
       </div>
 
+      {/* Mientras la tabla diferida va por detrás de los filtros, se ve algo apagada. */}
+      <div className={filas === visibles ? '' : 'opacity-60 transition-opacity'}>
+        <TablaEquipos filas={filas} cruce={cruce} estadoCruce={estadoCruce} hoy={hoy} />
+      </div>
+    </div>
+  );
+}
+
+type PropsTabla = {
+  filas: EquipoInstalado[];
+  cruce: CruceZoho | null;
+  estadoCruce: EstadoCruce;
+  hoy: string;
+};
+
+// Memoizada para que useDeferredValue sirva: con las mismas props (el `filas`
+// diferido, el `cruce` y el `estadoCruce` del hook, y el `hoy` fijo al abrir) un
+// render urgente por escribir en la búsqueda no vuelve a recorrer las ~1.250 filas.
+const TablaEquipos = memo(function TablaEquipos({ filas, cruce, estadoCruce, hoy }: PropsTabla) {
+  return (
+    <>
       {filas.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-3xl shadow-sm border border-dashed border-slate-300">
           <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -290,7 +311,7 @@ export default function BaseInstalada({ data, onBack }: Props) {
                   const estado = estadoVigencia(equipo.vigenciaMasProxima, hoy);
                   return (
                     <tr
-                      key={`${equipo.codigo}|${equipo.laboratorio}|${equipo.serie}`}
+                      key={equipo.id}
                       className="border-t border-slate-100 align-top hover:bg-slate-50 transition-colors"
                     >
                       <td className="px-3 py-2">
@@ -329,7 +350,11 @@ export default function BaseInstalada({ data, onBack }: Props) {
                           ))
                         )}
                         {equipo.codigosEpa.length > 0 && (
-                          <p className="mt-1 text-xs text-slate-400 whitespace-nowrap">{equipo.codigosEpa.join(', ')}</p>
+                          <div className="mt-1 text-xs text-slate-400">
+                            {equipo.codigosEpa.map((codigo) => (
+                              <p key={codigo}>{codigo}</p>
+                            ))}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">{equipo.serie}</td>
@@ -356,6 +381,6 @@ export default function BaseInstalada({ data, onBack }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
-}
+});
