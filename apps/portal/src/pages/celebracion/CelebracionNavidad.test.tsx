@@ -4,14 +4,14 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import CelebracionNavidad from './CelebracionNavidad';
 import { cargarVista, ErrorApi, guardarConfirmacion } from './api';
 import { notify } from '../../lib/notify';
-import { eventoDePrueba, vistaDePrueba } from './fixtures';
+import { equipoDePrueba, eventoDePrueba, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   cargarVista: vi.fn(),
   guardarConfirmacion: vi.fn(),
   guardarVotos: vi.fn(),
-  subirMiFoto: vi.fn(),
+  subirFotoCelebracion: vi.fn(),
   cargarResumen: vi.fn(),
 }));
 vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));
@@ -111,14 +111,38 @@ describe('CelebracionNavidad', () => {
     try {
       vi.mocked(cargarVista).mockResolvedValue(vistaDePrueba({ brindis: { dados: 1, minimo: 12 } }));
       await abrir();
-      expect(screen.getByRole('status').textContent).toContain('Brinda por todos tus compañeros para confirmar · 1 de 12');
+      const aviso = screen.getByRole('status').textContent ?? '';
+      expect(aviso).toContain('🔒 Para responder te falta:');
+      expect(aviso).toContain('✅ Sube tu foto graciosa');
+      expect(aviso).toContain('⬜ Brinda por todos tus compañeros (1 de 12)');
       expect(screen.getByText('Llevas 1 de 12 brindis para poder confirmar.')).toBeTruthy();
+      expect(screen.queryByText(/Sube tu foto graciosa desde tu tarjeta\./)).toBeNull();
       expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Ir al muro' }));
       expect(scroll).toHaveBeenCalledTimes(1);
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
+  });
+
+  it('sin mi foto graciosa el candado sigue aunque los brindis estén completos, y la lista lo marca', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(
+      vistaDePrueba({ equipo: equipoDePrueba(false), brindis: { dados: 2, minimo: 2 } }),
+    );
+    await abrir();
+    const aviso = screen.getByRole('status').textContent ?? '';
+    expect(aviso).toContain('🔒 Para responder te falta:');
+    expect(aviso).toContain('⬜ Sube tu foto graciosa');
+    expect(aviso).toContain('✅ Brinda por todos tus compañeros (2 de 2)');
+    expect(screen.queryByText(/Llevas 2 de 2/)).toBeNull();
+    expect(screen.getByText('Sube tu foto graciosa desde tu tarjeta.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+  });
+
+  it('con foto y brindis completos no hay candado', async () => {
+    await abrir();
+    expect(screen.queryByText(/Para responder te falta/)).toBeNull();
+    expect(screen.getByRole('button', { name: /Sí voy/ })).toBeTruthy();
   });
 
   it('con las confirmaciones cerradas no hay candado aunque falten brindis', async () => {

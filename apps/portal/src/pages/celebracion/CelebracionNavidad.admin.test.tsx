@@ -10,7 +10,7 @@ vi.mock('./api', async (importOriginal) => ({
   cargarVista: vi.fn(),
   guardarConfirmacion: vi.fn(),
   guardarVotos: vi.fn(),
-  subirMiFoto: vi.fn(),
+  subirFotoCelebracion: vi.fn(),
   cargarResumen: vi.fn(),
 }));
 vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));

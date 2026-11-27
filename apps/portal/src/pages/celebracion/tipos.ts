@@ -35,6 +35,8 @@ export interface Miembro {
   userId: string;
   nombre: string;
   avatar: string | null;
+  /** Su foto graciosa del evento (distinta del avatar del perfil); null si aún no la sube. */
+  foto: string | null;
   cualidades: CualidadVotada[];
 }
 

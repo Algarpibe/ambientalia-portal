@@ -15,10 +15,11 @@ interface Props {
 }
 
 function Avatar({ miembro }: { miembro: Miembro }) {
+  const imagen = miembro.foto ?? miembro.avatar;
   return (
     <div className="mx-auto mb-3 h-[74px] w-[74px] rounded-full p-[3px]" style={{ background: ESPECTRO }}>
-      {miembro.avatar ? (
-        <img src={miembro.avatar} alt="" className="h-full w-full rounded-full bg-white object-cover" />
+      {imagen ? (
+        <img src={imagen} alt="" className="h-full w-full rounded-full bg-white object-cover" />
       ) : (
         <div
           aria-hidden="true"
@@ -89,7 +90,7 @@ export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrin
 
             {esMia ? (
               <label className={`${BOTON} cursor-pointer focus-within:ring-2 focus-within:ring-[#006699]/30`}>
-                {subiendo ? 'Subiendo…' : '📷 Subir mi foto'}
+                {subiendo ? 'Subiendo…' : m.foto ? '📷 Cambiar mi foto graciosa' : '📷 Subir mi foto graciosa'}
                 <input type="file" accept="image/*" className="sr-only" disabled={subiendo} onChange={(e) => void elegirFoto(e)} />
               </label>
             ) : (

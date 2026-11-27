@@ -2,16 +2,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import CelebracionNavidad from './CelebracionNavidad';
-import { cargarVista, ErrorApi, guardarVotos, subirMiFoto } from './api';
+import { cargarVista, ErrorApi, guardarVotos, subirFotoCelebracion } from './api';
 import { notify } from '../../lib/notify';
-import { BRUNO, vistaDePrueba } from './fixtures';
+import { notifyProfileUpdated } from '../../hooks/useProfile';
+import { fileToResizedDataUrl } from '../../lib/image';
+import { BRUNO, equipoDePrueba, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   cargarVista: vi.fn(),
   guardarConfirmacion: vi.fn(),
   guardarVotos: vi.fn(),
-  subirMiFoto: vi.fn(),
+  subirFotoCelebracion: vi.fn(),
   cargarResumen: vi.fn(),
 }));
 vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));
@@ -22,7 +24,7 @@ vi.mock('../../hooks/useProfile', () => ({ notifyProfileUpdated: vi.fn() }));
 beforeEach(() => {
   vi.mocked(cargarVista).mockResolvedValue(vistaDePrueba());
   vi.mocked(guardarVotos).mockResolvedValue();
-  vi.mocked(subirMiFoto).mockResolvedValue();
+  vi.mocked(subirFotoCelebracion).mockResolvedValue();
 });
 
 afterEach(() => {
@@ -54,6 +56,7 @@ describe('CelebracionNavidad · muro', () => {
     try {
       vi.mocked(cargarVista)
         .mockResolvedValueOnce(vistaDePrueba({ brindis: { dados: 11, minimo: 12 } }))
+        // (la foto ya está subida en las dos vistas: solo cambian los brindis)
         .mockResolvedValue(vistaDePrueba({ brindis: { dados: 12, minimo: 12 } }));
       await abrir();
       expect(scroll).not.toHaveBeenCalled();
@@ -81,12 +84,33 @@ describe('CelebracionNavidad · muro', () => {
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
   });
 
-  it('subir mi foto la redimensiona, la guarda y recarga', async () => {
+  it('subir mi foto graciosa la redimensiona a 512, la guarda sin tocar el perfil y recarga', async () => {
     await abrir();
-    const entrada = within(screen.getByRole('article', { name: 'Ana Ruiz' })).getByLabelText(/Subir mi foto/);
+    const entrada = within(screen.getByRole('article', { name: 'Ana Ruiz' })).getByLabelText(/foto graciosa/);
     fireEvent.change(entrada, { target: { files: [new File(['x'], 'yo.png', { type: 'image/png' })] } });
-    await waitFor(() => expect(subirMiFoto).toHaveBeenCalledWith('data:image/jpeg;base64,AAAA'));
+    await waitFor(() => expect(subirFotoCelebracion).toHaveBeenCalledWith('data:image/jpeg;base64,AAAA'));
+    expect(fileToResizedDataUrl).toHaveBeenCalledWith(expect.any(File), 512, 0.8);
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
-    expect(notify).toHaveBeenCalledWith('📸 Foto actualizada en el muro del equipo.');
+    expect(notify).toHaveBeenCalledWith('📸 ¡Foto graciosa lista!');
+    expect(notifyProfileUpdated).not.toHaveBeenCalled();
+  });
+
+  it('con los brindis completos, subir la foto que faltaba enciende la confirmación y baja a ella una vez', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      vi.mocked(cargarVista)
+        .mockResolvedValueOnce(vistaDePrueba({ equipo: equipoDePrueba(false), brindis: { dados: 2, minimo: 2 } }))
+        .mockResolvedValue(vistaDePrueba({ brindis: { dados: 2, minimo: 2 } }));
+      await abrir();
+      expect(scroll).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+      const entrada = within(screen.getByRole('article', { name: 'Ana Ruiz' })).getByLabelText(/foto graciosa/);
+      fireEvent.change(entrada, { target: { files: [new File(['x'], 'yo.png', { type: 'image/png' })] } });
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: /Sí voy/ })).toBeTruthy();
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 });

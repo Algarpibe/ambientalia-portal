@@ -60,15 +60,17 @@ export async function readmitirInvitado(userId: string): Promise<void> {
   await leer(await authFetch(`${BASE}/excluidos/${encodeURIComponent(userId)}`, { method: 'DELETE' }));
 }
 
-/** La foto propia: el mismo endpoint que Configuración (solo cambia la de quien llama). */
-export async function subirMiFoto(dataUrl: string): Promise<void> {
-  await leer(await authFetch('/api/users/me/avatar', { method: 'PATCH', body: JSON.stringify({ avatar: dataUrl }) }));
+/** Mi foto graciosa del evento (obligatoria para responder); no toca la foto de perfil. */
+export async function subirFotoCelebracion(dataUrl: string): Promise<void> {
+  await leer(await authFetch(`${BASE}/mi-foto`, { method: 'PUT', body: JSON.stringify({ foto: dataUrl }) }));
 }
 
 const MENSAJES: Record<string, string> = {
   confirmaciones_cerradas: 'Las confirmaciones ya están cerradas.',
   votos_cerrados: 'La votación ya se cerró.',
   faltan_brindis: 'Primero brinda por tus compañeros en el muro.',
+  falta_foto: 'Primero sube tu foto graciosa en el muro.',
+  foto_invalida: 'La foto no es válida. Prueba con otra imagen.',
   asiste_invalido: 'Indica si vas o no.',
   preferencia_invalida: 'Elige una preferencia de menú.',
   mensaje_invalido: 'El mensaje no puede pasar de 200 caracteres ni llevar saltos de línea.',

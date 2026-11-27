@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import logo from '../../assets/ambientalia-logo.png';
-import { notifyProfileUpdated } from '../../hooks/useProfile';
 import { fileToResizedDataUrl } from '../../lib/image';
 import { notify } from '../../lib/notify';
-import { cargarVista, ErrorApi, guardarConfirmacion, guardarVotos, mensajeDeError, subirMiFoto } from './api';
+import { cargarVista, ErrorApi, guardarConfirmacion, guardarVotos, mensajeDeError, subirFotoCelebracion } from './api';
 import { lanzarConfeti, prefiereMenosMovimiento } from './confeti';
 import Confirmacion from './Confirmacion';
 import CuentaAtras from './CuentaAtras';
@@ -80,17 +79,17 @@ export default function CelebracionNavidad() {
     if (abierta) tituloRef.current?.focus();
   }, [abierta]);
 
-  // Al completar el último brindis que faltaba, baja sola a la confirmación (nunca en la primera carga).
-  const dados = vista?.brindis.dados;
-  const minimo = vista?.brindis.minimo;
-  const abiertas = vista?.evento.confirmacionesAbiertas;
-  const dadosAntes = useRef<number | null>(null);
+  // Para responder hacen falta la foto graciosa y todos los brindis. Al cumplir lo último que faltaba
+  // (bloqueada pasa de true a false), baja sola a la confirmación; nunca en la primera carga.
+  const tieneFoto = vista?.equipo.find((m) => m.userId === vista.yo)?.foto != null;
+  const bloqueadaODesconocido = vista ? vista.evento.confirmacionesAbiertas && (!tieneFoto || vista.brindis.dados < vista.brindis.minimo) : null;
+  const bloqueadaAntes = useRef<boolean | null>(null);
   useEffect(() => {
-    if (dados === undefined || minimo === undefined) return;
-    const antes = dadosAntes.current;
-    dadosAntes.current = dados;
-    if (antes !== null && antes < minimo && dados >= minimo && abiertas) irA(confirmacionRef);
-  }, [dados, minimo, abiertas]);
+    if (bloqueadaODesconocido === null) return;
+    const antes = bloqueadaAntes.current;
+    bloqueadaAntes.current = bloqueadaODesconocido;
+    if (antes === true && !bloqueadaODesconocido) irA(confirmacionRef);
+  }, [bloqueadaODesconocido]);
 
   useEffect(() => {
     const anterior = document.title;
@@ -172,18 +171,24 @@ export default function CelebracionNavidad() {
 
   const subirFoto = async (archivo: File) => {
     try {
-      await subirMiFoto(await fileToResizedDataUrl(archivo, 256, 0.85));
-    } catch {
-      notify('No se pudo actualizar la foto.', 'error');
+      await subirFotoCelebracion(await fileToResizedDataUrl(archivo, 512, 0.8));
+    } catch (e) {
+      notify(e instanceof ErrorApi ? mensajeDeError(e) : 'No se pudo subir la foto.', 'error');
       return;
     }
-    notify('📸 Foto actualizada en el muro del equipo.');
-    notifyProfileUpdated();
+    notify('📸 ¡Foto graciosa lista!');
     await recargar();
   };
 
   const { evento } = vista;
-  const bloqueada = evento.confirmacionesAbiertas && vista.brindis.dados < vista.brindis.minimo;
+  const bloqueada = bloqueadaODesconocido === true;
+  const pendientes = [
+    { hecho: tieneFoto, texto: 'Sube tu foto graciosa' },
+    {
+      hecho: vista.brindis.dados >= vista.brindis.minimo,
+      texto: `Brinda por todos tus compañeros (${vista.brindis.dados} de ${vista.brindis.minimo})`,
+    },
+  ];
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#FAFAFC] text-[#2B2D35]" style={{ fontFamily: FUENTE_TEXTO }}>
@@ -236,13 +241,15 @@ export default function CelebracionNavidad() {
               <Etiqueta tono="pink">🌟 El corazón de Ambientalia</Etiqueta>
               <Titulo id="titulo-equipo">Nuestro equipo</Titulo>
               <p className="text-sm text-[#5C6170]">
-                Brinda por tus compañeros eligiendo hasta {evento.maxCualidades} cualidades: tu voto es anónimo. Sube tu foto
-                desde tu tarjeta.
+                Brinda por tus compañeros eligiendo hasta {evento.maxCualidades} cualidades: tu voto es anónimo.
               </p>
-              {bloqueada && (
+              {bloqueada && !pendientes[1].hecho && (
                 <p className="mt-2 text-sm font-semibold text-[#C95B00]">
                   Llevas {vista.brindis.dados} de {vista.brindis.minimo} brindis para poder confirmar.
                 </p>
+              )}
+              {bloqueada && !tieneFoto && (
+                <p className="mt-2 text-sm font-semibold text-[#C95B00]">Sube tu foto graciosa desde tu tarjeta.</p>
               )}
             </div>
             <MuroEquipo
@@ -270,9 +277,16 @@ export default function CelebracionNavidad() {
                 role="status"
                 className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#FDB913] bg-[#FFF6E5] px-4 py-3 text-sm font-semibold text-[#8A4B00]"
               >
-                <span>
-                  🔒 Brinda por todos tus compañeros para confirmar · {vista.brindis.dados} de {vista.brindis.minimo}
-                </span>
+                <div>
+                  <p>🔒 Para responder te falta:</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {pendientes.map((p) => (
+                      <li key={p.texto}>
+                        {p.hecho ? '✅' : '⬜'} {p.texto}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
                 <button type="button" className={BOTON} onClick={() => irA(muroRef)}>
                   Ir al muro
                 </button>
