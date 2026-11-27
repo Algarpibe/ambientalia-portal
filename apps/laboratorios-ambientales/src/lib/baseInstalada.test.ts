@@ -475,6 +475,59 @@ describe('marcasDe', () => {
     ]);
     expect(marcasDe('Met One Instruments, Inc.')).toEqual(['Met One Instruments, Inc.']);
   });
+
+  it('una marca con «/» sin espacios queda entera', () => {
+    expect(marcasDe('Marca A/B')).toEqual(['Marca A/B']);
+  });
+
+  it('una empresa con nombre viejo y nuevo es una sola opción', () => {
+    expect(marcasDe('Environnement S.A. / ENVEA')).toEqual(['Environnement S.A. / ENVEA']);
+    expect(marcasDe('BGI Inc. / Mesa Laboratories Inc.')).toEqual(['BGI Inc. / Mesa Laboratories Inc.']);
+    expect(marcasDe('Graseby Andersen / Sierra-Andersen / General Metal Works')).toEqual([
+      'Graseby Andersen / Sierra-Andersen / General Metal Works',
+    ]);
+  });
+
+  it('dos fabricantes distintos siguen siendo dos opciones', () => {
+    expect(marcasDe('Tisch Environmental / New Star Environmental')).toHaveLength(2);
+  });
+
+  it('un texto largo mezcla fabricantes sueltos y grupos', () => {
+    expect(
+      marcasDe('Teledyne Monitor Labs / Casella / Ecotech / Acoem / Aeris / Wedding & Associates'),
+    ).toEqual(['Teledyne Monitor Labs', 'Casella', 'Ecotech / Acoem', 'Aeris', 'Wedding & Associates']);
+  });
+});
+
+describe('marcas de una misma empresa', () => {
+  const envea = equipo({ serie: 'E1', marcasYModelos: [{ marca: 'Environnement S.A. / ENVEA', modelo: 'AF22M' }] });
+  const otro = equipo({ serie: 'E2', marcasYModelos: [{ marca: 'Tisch Environmental', modelo: 'TE-6070' }] });
+
+  it('el filtro por el nombre del grupo pasa a los equipos de cualquiera de sus fabricantes', () => {
+    const lista = [envea, otro];
+    const filtros = { ...FILTROS_VACIOS, marca: 'Environnement S.A. / ENVEA' };
+    expect(series(filtrarEquipos(lista, filtros, null, HOY))).toEqual(['E1']);
+    // Un equipo cuya marca nombra solo uno de los dos también pasa.
+    const solo = equipo({ serie: 'E3', marcasYModelos: [{ marca: 'ENVEA', modelo: 'X' }] });
+    expect(series(filtrarEquipos([solo], filtros, null, HOY))).toEqual(['E3']);
+  });
+
+  it('las opciones traen el grupo una sola vez, aunque varios equipos lo nombren', () => {
+    const otroEnvea = equipo({
+      serie: 'E4',
+      marcasYModelos: [{ marca: 'Environnement S.A. / ENVEA', modelo: 'MP101M' }],
+    });
+    expect(opcionesDeFiltro([envea, otroEnvea, otro], '').marcas).toEqual([
+      'Environnement S.A. / ENVEA',
+      'Tisch Environmental',
+    ]);
+  });
+
+  it('un fabricante que sale en dos textos de marca se lista una vez', () => {
+    const a = equipo({ marcasYModelos: [{ marca: 'Tisch Environmental / New Star Environmental', modelo: 'A' }] });
+    const b = equipo({ marcasYModelos: [{ marca: 'Tisch Environmental', modelo: 'B' }] });
+    expect(opcionesDeFiltro([a, b], '').marcas).toEqual(['New Star Environmental', 'Tisch Environmental']);
+  });
 });
 
 describe('opcionesDeFiltro', () => {
@@ -505,6 +558,11 @@ describe('textoRecuento', () => {
   it('singular y plural', () => {
     expect(textoRecuento([])).toBe('0 equipos de 0 laboratorios');
     expect(textoRecuento([equipo()])).toBe('1 equipo de 1 laboratorio');
+  });
+
+  it('separa los miles al estilo es-CO', () => {
+    const muchos = Array.from({ length: 1275 }, (_, i) => equipo({ serie: `S${i}` }));
+    expect(textoRecuento(muchos)).toBe('1.275 equipos de 1 laboratorio');
   });
 
   it('cuenta los laboratorios por código, no los equipos', () => {
