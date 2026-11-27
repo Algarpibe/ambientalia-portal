@@ -27,7 +27,7 @@ quién recuperar.
   y Contabilidad. En Zoho el campo es `cf_nit`: solo dígitos, sin dígito de
   verificación.
 - El dataset de datos.gov.co trae el NIT con puntos y dígito de verificación
-  (`900.241.439-8`). De los 90 laboratorios, 85 tienen NIT.
+  (por ejemplo, `900.000.001-7`). De los 90 laboratorios, 85 tienen NIT.
 - Comprobación previa con el conector de Zoho (2026-11-26): 77 de los 90
   laboratorios tienen un contacto en Zoho con su NIT. Hay contactos con NIT de
   relleno (menos de 6 dígitos) y NIT repetidos en varios contactos.
@@ -39,7 +39,7 @@ quién recuperar.
 ## Reglas
 
 **NIT base.** Se toma lo que hay antes del primer `-` y se quitan los caracteres
-que no son dígitos: `900.241.439-8` da `900241439`. Un NIT base de menos de 6
+que no son dígitos: `900.000.001-7` da `900000001`. Un NIT base de menos de 6
 dígitos (relleno) o de más de 10 se ignora, en la app y en hub-api: la app no lo
 envía y el laboratorio queda «Sin NIT».
 
@@ -161,7 +161,8 @@ comando SQL completo que se le pasa al usuario:
 
 - hub-api: 400 con cuerpo inválido, 401 sin sesión, 403 sin la app, 429 por
   encima de 5 peticiones por minuto del mismo usuario, 500 si
-  falla la réplica, con el `errorEnJson` habitual.
+  falla la réplica, con el `sendError` propio del router (como los demás:
+  `{ error: 'internal error' }`, sin detalle).
 - La app trata todo fallo igual (aviso y reintento). La vista nunca se cae por
   Zoho.
 

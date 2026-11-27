@@ -882,7 +882,7 @@ export const ETIQUETA_ESTADO_CLIENTE: Record<EstadoCliente, string> = {
 
 /**
  * NIT base, la misma regla que hub-api: lo de antes del primer «-», solo
- * dígitos, de 6 a 10. `900.241.439-8` da `900241439`. Un NIT que no vale no se
+ * dígitos, de 6 a 10. `900.000.001-7` da `900000001`. Un NIT que no vale no se
  * envía: hub-api rechazaría la petición entera.
  */
 export function nitBase(nit: string): string | null {
@@ -1876,8 +1876,8 @@ más: ni importes, ni nombres, ni identificadores.
 | No está en Zoho | Ningún contacto cliente tiene ese NIT. |
 | Sin NIT | El dataset no trae NIT, o no da de 6 a 10 dígitos. |
 
-- **NIT base:** lo de antes del primer «-», solo dígitos (`900.241.439-8` →
-  `900241439`). Es el formato de `cf_nit` en Zoho. Varios contactos con el
+- **NIT base:** lo de antes del primer «-», solo dígitos (`900.000.001-7` →
+  `900000001`). Es el formato de `cf_nit` en Zoho. Varios contactos con el
   mismo NIT se suman.
 - **OCMA vendido** y **Repuestos OCMA:** la factura más reciente con un artículo
   de la categoría «OCMA-500 Series» o «C&R OCMA-500». Solo cuentan los que

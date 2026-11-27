@@ -53,6 +53,14 @@ ejecución de la relación comercial y el cumplimiento de obligaciones contables
 tributarias. Para clientes persona natural, NIT y dirección constituyen dato
 personal (Ley 1581 de 2012).
 
+En **Laboratorios ambientales** la finalidad es otra: **prospección comercial**,
+saber si un laboratorio acreditado ante el IDEAM ya es cliente, desde cuándo no
+compra y si tiene un OCMA. Base legal: el interés legítimo de Ambientalia en
+atender a sus clientes y prospectos, con datos que salen de los registros
+propios (facturas) y de un dataset público. Si el laboratorio es persona
+natural, «es cliente y compró en tal fecha» es dato personal: por eso solo
+salen fechas y estados, y solo a quien tiene la app.
+
 **No** se expone email, teléfono ni cédula por ninguna query del hub, salvo los correos de los contactos de clientes de Trazabilidad Mantenimientos (§2.2).
 
 Medidas asociadas:
@@ -67,7 +75,10 @@ Medidas asociadas:
   recibe 403 (cierre de **SEC-210 / SEC-211 / PRIV-810**).
 - **No se almacena ni se cachea el detalle**: NIT y dirección se leen bajo demanda
   de `books.contacts` / `books.*.raw` para el documento consultado; el archivo de
-  WO-sales se genera bajo demanda y se descarga.
+  WO-sales se genera bajo demanda y se descarga. **Excepción:** el cruce de
+  Laboratorios ambientales guarda en memoria, 2 minutos, el mapa NIT → tres
+  fechas de todos los contactos cliente (ver arriba); no se escribe en disco ni
+  en la base.
 
 Los `query params` de estos endpoints son números de documento, fechas y un nombre
 de cliente opcional.

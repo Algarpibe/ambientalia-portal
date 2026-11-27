@@ -48,7 +48,7 @@ export const ETIQUETA_ESTADO_CLIENTE: Record<EstadoCliente, string> = {
 /**
  * NIT base, la misma regla que hub-api (apps/hub-api/src/laboratorios/
  * clientes.ts): lo de antes del primer «-», solo dígitos, de 6 a 10.
- * `900.241.439-8` da `900241439`. Un NIT que no vale no se envía: hub-api
+ * `900.000.001-7` da `900000001`. Un NIT que no vale no se envía: hub-api
  * rechazaría la petición entera. Si cambias esta regla, cambia también la de
  * hub-api y las pruebas de las dos.
  */

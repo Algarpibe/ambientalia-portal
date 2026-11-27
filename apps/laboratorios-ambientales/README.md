@@ -2,7 +2,8 @@
 
 Buscador y análisis de los laboratorios ambientales acreditados por el IDEAM,
 sobre el dataset abierto [`2waz-acaa`](https://www.datos.gov.co/resource/2waz-acaa.json)
-de datos.gov.co (~19.000 acreditaciones).
+de datos.gov.co (~19.000 acreditaciones). La vista de prospectos cruza además
+cada laboratorio con Zoho Books por NIT, a través de hub-api.
 
 ## Cómo se ejecuta
 
@@ -36,13 +37,16 @@ porque el bundle lo produce el portal.
 | `src/lib/brands.ts` | Agrupación laboratorio→equipos del Análisis de Marcas. |
 | `src/lib/prospects.ts` | Prospectos de grasas y aceites: qué acreditación cuenta, infrarrojo o gravimetría, agrupación por laboratorio, vigencia, orden y filtros. |
 | `src/lib/exportProspects.ts` | Filas y nombre de fichero del Excel de prospectos. |
+| `src/lib/clientes.ts` | Cruce con Zoho: NIT base, estado de cliente (36 meses), filtro y estado de la consulta (`estadoDelCruce`). |
+| `src/services/clientesZoho.ts` | Consulta del cruce a hub-api (`POST /api/laboratorios/clientes`), con el JWT del portal y tope de tiempo. |
 | `src/lib/fechas.ts` | Fecha local de hoy y suma de meses de calendario. |
 | `src/lib/view.ts` | La vista abierta, en el hash de la URL (`#buscador`, `#marcas`, `#prospectos`). |
 | `src/pages/` | Vistas: `Buscador`, `Dashboard` (Análisis de Marcas) y `Prospectos`. |
+| `src/components/` | Piezas de vista: `CeldaCliente`, la celda de la columna «Cliente». |
 | `src/App.tsx` | Shell: carga, errores y navegación. |
 
 La lógica pura vive en `src/lib/` con tests unitarios; los componentes de
-`src/pages/` solo la orquestan.
+`src/pages/` y `src/components/` solo la orquestan y la pintan.
 
 ## Carga y cache
 
@@ -173,8 +177,8 @@ más: ni importes, ni nombres, ni identificadores.
 | No está en Zoho | Ningún contacto de tipo cliente tiene ese NIT. |
 | Sin NIT | El dataset no trae NIT, o no da de 6 a 10 dígitos. |
 
-- **NIT base:** lo de antes del primer «-», solo dígitos (`900.241.439-8` →
-  `900241439`). Es el formato de `cf_nit` en Zoho. Varios contactos con el
+- **NIT base:** lo de antes del primer «-», solo dígitos (`900.000.001-7` →
+  `900000001`). Es el formato de `cf_nit` en Zoho. Varios contactos con el
   mismo NIT se suman. La regla está dos veces, en
   `src/lib/clientes.ts` y en `apps/hub-api/src/laboratorios/clientes.ts`, con
   las mismas pruebas: si se separan, hub-api rechaza la petición entera.
@@ -201,9 +205,11 @@ más: ni importes, ni nombres, ni identificadores.
 ## Mejoras pendientes
 
 - Cruce con Zoho:
-  - Un 429 (más de 5 consultas por minuto) sale con el aviso genérico y
-    «Reintentar» falla hasta que pasa el minuto. Se podría decir «espera un
-    minuto».
+  - Cada vez que se abre `#prospectos` se hace una consulta: ir y volver entre
+    el Buscador y Prospectos seis veces en un minuto da 429. Sale el aviso
+    genérico y «Reintentar» falla hasta que pasa el minuto. Mejoras posibles:
+    decir «espera un minuto», o guardar el último cruce en memoria unos
+    minutos.
   - «Reintentar» desaparece al pulsarlo y el foco de teclado se pierde.
   - Si el dataset pasara de 150 laboratorios de grasas y aceites, hub-api
     rechazaría la petición (400): habría que partirla.
