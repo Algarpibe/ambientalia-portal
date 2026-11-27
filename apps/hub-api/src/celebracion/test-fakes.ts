@@ -48,7 +48,7 @@ export class FakeStore implements CelebracionStore {
     this.excluidos = this.excluidos.filter((x) => !(x.evento === evento && x.userId === userId));
   }
 
-  async listarEquipo():Promise<Miembro[]> {
+  async listarEquipo(): Promise<Miembro[]> {
     return this.usuarios
       .filter((u) => u.activo)
       .sort((a, b) => a.nombre.localeCompare(b.nombre))

@@ -280,6 +280,31 @@ puede quitar a cualquier usuario activo de la invitación y volver a invitarlo.
   - El admin no puede quitarse a sí mismo (400 `exclusion_propia`); si pudiera,
     perdería el panel.
 
+## Ampliación: 3 brindis para poder responder (2026-11-27)
+
+Para responder, sea «Sí voy» o «No podré ir», hay que haber brindado antes por al
+menos 3 compañeros invitados distintos, dándole al menos una cualidad a cada uno.
+
+- **Servidor:**
+  - `config.ts` define `MIN_BRINDIS = 3`. El mínimo real es
+    `min(3, personas invitadas − 1)`, para que un equipo pequeño no deje a nadie
+    bloqueado.
+  - `GET /api/celebracion` trae `brindis: { dados, minimo }`. Los votos a personas
+    que no están invitadas no cuentan.
+  - `PUT /confirmacion` responde 409 `faltan_brindis` si no se llega al mínimo. El
+    orden de las comprobaciones es: `no_invitado`, `confirmaciones_cerradas`,
+    `faltan_brindis` y después el cuerpo.
+- **Página:**
+  - Mientras falten brindis y las confirmaciones sigan abiertas, la tarjeta de
+    confirmación se ve apagada y no se puede usar. Muestra «Brinda por al menos 3
+    compañeros para confirmar · 1 de 3» y un botón «Ir al muro», que sube hasta
+    el muro.
+  - El muro también muestra cuántos brindis llevas.
+  - Al completar el último brindis necesario, la página baja sola hasta la
+    confirmación, que ya se ve encendida. Respeta el movimiento reducido.
+- **Respuestas anteriores:** quien ya había respondido conserva su respuesta, pero
+  para cambiarla le aplica la misma regla.
+
 ## Fuera de alcance
 
 - Un módulo genérico de eventos con pantalla para crearlos. Para otro evento se
