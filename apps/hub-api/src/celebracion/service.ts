@@ -88,7 +88,7 @@ export interface Vista {
   misVotos: Record<string, string[]>;
   /** Brindis por compañeros invitados distintos que llevo y los que hacen falta para responder. */
   brindis: { dados: number; minimo: number };
-  /** true para quien no es admin: sus `cualidades` llegan vacías; se desvelan el día del almuerzo. */
+  /** true para quien no es admin: las `cualidades` de cada miembro de `equipo` llegan vacías; se desvelan el día del almuerzo. */
   cualidadesOcultas: boolean;
 }
 
@@ -167,7 +167,8 @@ export class CelebracionService {
     const ahora = this.now();
     const [{ equipo, excluidos }, conteos, mios, confirmacion, fotos] = await Promise.all([
       this.invitados(),
-      this.store.contarVotos(EVENTO.id),
+      // Los conteos solo se envían al admin: a los demás ni se consultan.
+      sesion.esAdmin ? this.store.contarVotos(EVENTO.id) : Promise.resolve([] as ConteoVotos[]),
       this.store.votosDe(EVENTO.id, sesion.userId),
       this.store.confirmacionDe(EVENTO.id, sesion.userId),
       this.store.listarFotos(EVENTO.id),

@@ -81,6 +81,19 @@ describe('router de la invitación', () => {
     expect(service.vista).toHaveBeenCalledWith({ userId: ADMIN, esAdmin: true });
   });
 
+  it('GET /celebracion pasa esAdmin: false a quien no es admin, aunque su token diga admin y la BD diga lector', async () => {
+    const service = stub();
+    const app = montar(service);
+    const conTokenDeAdmin = cabecera(ANA, 'admin');
+    roles.set(ANA, 'reader'); // requireAuth sustituye el rol del token por el de la BD
+    const res = await request(app).get('/api/celebracion').set(conTokenDeAdmin);
+    expect(res.status).toBe(200);
+    expect(service.vista).toHaveBeenCalledWith({ userId: ANA, esAdmin: false });
+    vi.mocked(service.vista).mockClear();
+    await request(app).get('/api/celebracion').set(cabecera(BRUNO));
+    expect(service.vista).toHaveBeenCalledWith({ userId: BRUNO, esAdmin: false });
+  });
+
   it('GET /celebracion/mi-estado responde el estado de la persona', async () => {
     const service = stub();
     const res = await request(montar(service)).get('/api/celebracion/mi-estado').set(cabecera(ANA));

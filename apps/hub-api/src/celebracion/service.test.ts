@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { CUALIDADES, EVENTO, PREFERENCIAS } from './config.js';
 import { CelebracionService } from './service.js';
 import { FakeStore } from './test-fakes.js';
@@ -83,8 +83,18 @@ describe('vista', () => {
     expect(vista.equipo.map((m) => m.cualidades)).toEqual([[], [], []]);
     // Ni rastro de los conteos en la respuesta: se verían en las herramientas del navegador.
     expect(JSON.stringify(vista.equipo)).not.toContain('votos');
+    expect(JSON.stringify(vista)).not.toMatch(/"votos":/);
     // Sus propios brindis sí le llegan, para poder cambiarlos.
     expect(vista.misVotos).toEqual({ [BRUNO]: ['Liderazgo'] });
+  });
+
+  it('solo consulta los conteos de votos cuando los va a enviar: la vista del admin sí, la de los demás no', async () => {
+    const { store, service } = montar();
+    const contar = vi.spyOn(store, 'contarVotos');
+    await service.vista({ userId: ANA, esAdmin: false });
+    expect(contar).not.toHaveBeenCalled();
+    await service.vista({ userId: ANA, esAdmin: true });
+    expect(contar).toHaveBeenCalledTimes(1);
   });
 
   it('el admin recibe cualidadesOcultas: false y también su propio top 3', async () => {
