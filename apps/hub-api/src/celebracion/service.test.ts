@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { CUALIDADES, EVENTO, PREFERENCIAS } from './config.js';
 import { CelebracionService } from './service.js';
 import { FakeStore } from './test-fakes.js';
@@ -60,17 +60,49 @@ describe('vista', () => {
     expect(equipo[1].avatar).toBe('data:image/jpeg;base64,AAAA');
   });
 
-  it('cada tarjeta trae su top 3 con número, sin contar votos de cuentas inactivas', async () => {
+  it('al admin, cada tarjeta le trae su top 3 con número, sin contar votos de cuentas inactivas', async () => {
     const { store, service } = montar();
     await store.reemplazarVotos(EVENTO.id, ANA, BRUNO, ['Empatía', 'Liderazgo'], ANTES_DEL_CORTE);
     await store.reemplazarVotos(EVENTO.id, CARLA, BRUNO, ['Empatía'], ANTES_DEL_CORTE);
     await store.reemplazarVotos(EVENTO.id, DIANA, BRUNO, ['Compromiso', 'Creatividad', 'Generosidad'], ANTES_DEL_CORTE);
-    const { equipo } = await service.vista({ userId: ANA, esAdmin: false });
+    const { equipo } = await service.vista({ userId: ANA, esAdmin: true });
     expect(equipo.find((m) => m.userId === BRUNO)?.cualidades).toEqual([
       { cualidad: 'Empatía', votos: 2 },
       { cualidad: 'Liderazgo', votos: 1 },
     ]);
     expect(equipo.find((m) => m.userId === CARLA)?.cualidades).toEqual([]);
+  });
+
+  it('a quien no es admin no le llega ninguna cualidad, tampoco las suyas, y cualidadesOcultas lo dice', async () => {
+    const { store, service } = montar();
+    await store.reemplazarVotos(EVENTO.id, BRUNO, ANA, ['Empatía'], ANTES_DEL_CORTE);
+    await store.reemplazarVotos(EVENTO.id, ANA, BRUNO, ['Liderazgo'], ANTES_DEL_CORTE);
+    await store.reemplazarVotos(EVENTO.id, CARLA, BRUNO, ['Liderazgo'], ANTES_DEL_CORTE);
+    const vista = await service.vista({ userId: ANA, esAdmin: false });
+    expect(vista.cualidadesOcultas).toBe(true);
+    expect(vista.equipo.map((m) => m.cualidades)).toEqual([[], [], []]);
+    // Ni rastro de los conteos en la respuesta: se verían en las herramientas del navegador.
+    expect(JSON.stringify(vista.equipo)).not.toContain('votos');
+    expect(JSON.stringify(vista)).not.toMatch(/"votos":/);
+    // Sus propios brindis sí le llegan, para poder cambiarlos.
+    expect(vista.misVotos).toEqual({ [BRUNO]: ['Liderazgo'] });
+  });
+
+  it('solo consulta los conteos de votos cuando los va a enviar: la vista del admin sí, la de los demás no', async () => {
+    const { store, service } = montar();
+    const contar = vi.spyOn(store, 'contarVotos');
+    await service.vista({ userId: ANA, esAdmin: false });
+    expect(contar).not.toHaveBeenCalled();
+    await service.vista({ userId: ANA, esAdmin: true });
+    expect(contar).toHaveBeenCalledTimes(1);
+  });
+
+  it('el admin recibe cualidadesOcultas: false y también su propio top 3', async () => {
+    const { store, service } = montar();
+    await store.reemplazarVotos(EVENTO.id, BRUNO, ANA, ['Empatía'], ANTES_DEL_CORTE);
+    const vista = await service.vista({ userId: ANA, esAdmin: true });
+    expect(vista.cualidadesOcultas).toBe(false);
+    expect(vista.equipo.find((m) => m.userId === ANA)?.cualidades).toEqual([{ cualidad: 'Empatía', votos: 1 }]);
   });
 
   it('trae mis votos por compañero y mi respuesta', async () => {
@@ -321,6 +353,64 @@ describe('votar', () => {
   });
 });
 
+describe('cualidadesEquipo', () => {
+  const FOTO_DE_BRUNO = 'data:image/png;base64,BBBB';
+
+  /** Carla recibe 5 cualidades distintas, 4 empatadas a 1 voto; Diana, inactiva, vota y no cuenta. */
+  async function votosDePrueba(store: FakeStore): Promise<void> {
+    await store.reemplazarVotos(EVENTO.id, ANA, CARLA, ['Compromiso', 'Empatía', 'Creatividad'], ANTES_DEL_CORTE);
+    await store.reemplazarVotos(EVENTO.id, BRUNO, CARLA, ['Compromiso', 'Generosidad', 'Liderazgo'], ANTES_DEL_CORTE);
+    await store.reemplazarVotos(EVENTO.id, DIANA, CARLA, ['Perseverancia'], ANTES_DEL_CORTE);
+    await store.reemplazarVotos(EVENTO.id, CARLA, ANA, ['Empatía'], ANTES_DEL_CORTE);
+    await store.guardarFoto(EVENTO.id, BRUNO, FOTO_DE_BRUNO, ANTES_DEL_CORTE);
+  }
+
+  it('trae a los invitados por nombre, con su avatar, su foto y TODAS sus cualidades, por votos y con el desempate de la lista', async () => {
+    const { store, service } = montar();
+    await votosDePrueba(store);
+    expect(await service.cualidadesEquipo()).toEqual({
+      equipo: [
+        { userId: ANA, nombre: 'Ana Ruiz', avatar: null, foto: null, cualidades: [{ cualidad: 'Empatía', votos: 1 }] },
+        { userId: BRUNO, nombre: 'Bruno Díaz', avatar: 'data:image/jpeg;base64,AAAA', foto: FOTO_DE_BRUNO, cualidades: [] },
+        {
+          userId: CARLA,
+          nombre: 'Carla Gómez',
+          avatar: null,
+          foto: null,
+          cualidades: [
+            { cualidad: 'Compromiso', votos: 2 },
+            { cualidad: 'Liderazgo', votos: 1 },
+            { cualidad: 'Empatía', votos: 1 },
+            { cualidad: 'Creatividad', votos: 1 },
+            { cualidad: 'Generosidad', votos: 1 },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('sus 3 primeras son el top 3 que el admin ve en el muro', async () => {
+    const { store, service } = montar();
+    await votosDePrueba(store);
+    const muro = await service.vista({ userId: ANA, esAdmin: true });
+    const { equipo } = await service.cualidadesEquipo();
+    expect(equipo.map((p) => p.cualidades.slice(0, 3))).toEqual(muro.equipo.map((m) => m.cualidades));
+  });
+
+  it('deja fuera a los excluidos y no cuenta sus votos', async () => {
+    const { store, service } = montar();
+    await votosDePrueba(store);
+    await service.excluir(ANA, BRUNO);
+    const { equipo } = await service.cualidadesEquipo();
+    expect(equipo.map((p) => p.nombre)).toEqual(['Ana Ruiz', 'Carla Gómez']);
+    expect(equipo[1].cualidades).toEqual([
+      { cualidad: 'Empatía', votos: 1 },
+      { cualidad: 'Compromiso', votos: 1 },
+      { cualidad: 'Creatividad', votos: 1 },
+    ]);
+  });
+});
+
 describe('resumen', () => {
   it('cuenta van, no van y sin responder entre los activos, con los menús de quienes van', async () => {
     const { store, service } = montar();
@@ -434,11 +524,11 @@ describe('personas quitadas de la invitación', () => {
     await service.votar(BRUNO, CARLA, { cualidades: ['Empatía'] });
     await service.votar(ANA, CARLA, { cualidades: ['Empatía'] });
     await service.excluir(ADMIN, BRUNO);
-    const durante = await service.vista({ userId: ANA, esAdmin: false });
+    const durante = await service.vista({ userId: ANA, esAdmin: true });
     expect(durante.equipo.find((m) => m.userId === CARLA)?.cualidades).toEqual([{ cualidad: 'Empatía', votos: 1 }]);
     expect(await store.votosDe(EVENTO.id, BRUNO)).toHaveLength(1);
     await service.readmitir(BRUNO);
-    const despues = await service.vista({ userId: ANA, esAdmin: false });
+    const despues = await service.vista({ userId: ANA, esAdmin: true });
     expect(despues.equipo.find((m) => m.userId === CARLA)?.cualidades).toEqual([{ cualidad: 'Empatía', votos: 2 }]);
   });
 

@@ -126,10 +126,17 @@ export function esUuid(valor: unknown): valor is string {
 
 const ORDEN = new Map(CUALIDADES.map((c, i) => [c, i] as const));
 
-/** Las 3 cualidades más votadas; empata el orden de la lista. Las que ya no están en la lista no salen. */
-export function top3(conteos: readonly CualidadVotada[]): CualidadVotada[] {
+/**
+ * Todas las cualidades con votos, de más a menos votadas; empata el orden de la lista.
+ * Las que ya no están en la lista no salen. No cambia la lista que recibe.
+ */
+export function ordenarCualidades(conteos: readonly CualidadVotada[]): CualidadVotada[] {
   return conteos
     .filter((c) => c.votos > 0 && ORDEN.has(c.cualidad))
-    .sort((a, b) => b.votos - a.votos || (ORDEN.get(a.cualidad) ?? 0) - (ORDEN.get(b.cualidad) ?? 0))
-    .slice(0, MAX_CUALIDADES);
+    .sort((a, b) => b.votos - a.votos || (ORDEN.get(a.cualidad) ?? 0) - (ORDEN.get(b.cualidad) ?? 0));
+}
+
+/** Las 3 cualidades más votadas: las primeras de `ordenarCualidades`. */
+export function top3(conteos: readonly CualidadVotada[]): CualidadVotada[] {
+  return ordenarCualidades(conteos).slice(0, MAX_CUALIDADES);
 }

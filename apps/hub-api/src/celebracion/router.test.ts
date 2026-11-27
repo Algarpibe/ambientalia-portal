@@ -48,6 +48,7 @@ function stub(parcial: Partial<CelebracionActions> = {}): CelebracionActions {
     readmitir: vi.fn(async () => {}),
     subirFoto: vi.fn(async () => {}),
     resumen: vi.fn(async () => ({ hola: 'resumen' }) as never),
+    cualidadesEquipo: vi.fn(async () => ({ equipo: [] })),
     ...parcial,
   };
 }
@@ -78,6 +79,19 @@ describe('router de la invitación', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ hola: 'vista' });
     expect(service.vista).toHaveBeenCalledWith({ userId: ADMIN, esAdmin: true });
+  });
+
+  it('GET /celebracion pasa esAdmin: false a quien no es admin, aunque su token diga admin y la BD diga lector', async () => {
+    const service = stub();
+    const app = montar(service);
+    const conTokenDeAdmin = cabecera(ANA, 'admin');
+    roles.set(ANA, 'reader'); // requireAuth sustituye el rol del token por el de la BD
+    const res = await request(app).get('/api/celebracion').set(conTokenDeAdmin);
+    expect(res.status).toBe(200);
+    expect(service.vista).toHaveBeenCalledWith({ userId: ANA, esAdmin: false });
+    vi.mocked(service.vista).mockClear();
+    await request(app).get('/api/celebracion').set(cabecera(BRUNO));
+    expect(service.vista).toHaveBeenCalledWith({ userId: BRUNO, esAdmin: false });
   });
 
   it('GET /celebracion/mi-estado responde el estado de la persona', async () => {
@@ -170,6 +184,31 @@ describe('router de la invitación', () => {
     const res = await request(app).get('/api/celebracion/resumen').set(cabecera(ADMIN, 'admin'));
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ hola: 'resumen' });
+  });
+
+  it('GET /celebracion/cualidades es solo para admin: a los demás, 403 forbidden sin tocar el servicio', async () => {
+    const service = stub();
+    const app = montar(service);
+    const empleado = await request(app).get('/api/celebracion/cualidades').set(cabecera(ANA));
+    expect(empleado.status).toBe(403);
+    expect(empleado.body).toEqual({ error: 'forbidden' });
+    expect(service.cualidadesEquipo).not.toHaveBeenCalled();
+    const res = await request(app).get('/api/celebracion/cualidades').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ equipo: [] });
+    expect(service.cualidadesEquipo).toHaveBeenCalledTimes(1);
+  });
+
+  it('si GET /celebracion/cualidades falla, es 500 genérico y va a Sentry con su endpoint', async () => {
+    const service = stub({
+      cualidadesEquipo: vi.fn(async () => {
+        throw new Error('la BD se cayó');
+      }),
+    });
+    const res = await request(montar(service)).get('/api/celebracion/cualidades').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'internal error' });
+    expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'celebracion_cualidades' });
   });
 
   it('PUT y DELETE /celebracion/excluidos/:userId son solo para admin', async () => {
