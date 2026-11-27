@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CruceZoho, EstadoCruce, ResultadoCruce } from '../lib/clientes';
 import { estadoDelCruce } from '../lib/clientes';
 import { fetchClientesZoho } from '../services/clientesZoho';
@@ -14,6 +14,10 @@ export type CruceDeLaVista = {
 /**
  * El cruce con Zoho de una lista de NIT base, para una vista. Salió de
  * Prospectos el 2026-11-27 para que lo use también la Base instalada de aire.
+ * - `nits` debe ser la salida de `nitsParaConsultar` (ordenada, sin repetidos y solo
+ *   dígitos): el hook usa `nits.join(',')` como clave y la vuelve a partir por comas,
+ *   así que un valor con coma, o el mismo conjunto en otro orden, rompería la clave
+ *   o repetiría la consulta.
  * - La dependencia es el texto de los NIT y no la lista: si los datos se
  *   refrescan con los mismos NIT, no se repite la consulta.
  * - La petición se cancela al cerrar la vista o al cambiar los NIT.
@@ -47,10 +51,13 @@ export function useCruceZoho(nits: readonly string[]): CruceDeLaVista {
     return () => controller.abort();
   }, [claveNits, claveConsulta]);
 
+  // Estable entre renders: se puede pasar a hijos memoizados o a dependencias.
+  const reintentar = useCallback(() => setIntento((n) => n + 1), []);
+
   const estadoCruce = estadoDelCruce(resultado, claveConsulta);
   return {
     cruce: estadoCruce === 'listo' ? (resultado?.cruce ?? null) : null,
     estadoCruce,
-    reintentar: () => setIntento((n) => n + 1),
+    reintentar,
   };
 }
