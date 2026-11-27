@@ -1,8 +1,9 @@
 import { useState, type ChangeEvent } from 'react';
 import { notify } from '../../lib/notify';
+import AvatarPersona from './AvatarPersona';
 import { BOTON } from './estilos';
-import { ESPECTRO, FUENTE_TITULOS } from './marca';
-import { colorDe, iniciales, primerNombre } from './persona';
+import { FUENTE_TITULOS } from './marca';
+import { primerNombre } from './persona';
 import type { Miembro } from './tipos';
 
 interface Props {
@@ -12,25 +13,6 @@ interface Props {
   votosAbiertos: boolean;
   onBrindis: (miembro: Miembro) => void;
   onSubirFoto: (archivo: File) => Promise<void>;
-}
-
-function Avatar({ miembro }: { miembro: Miembro }) {
-  const imagen = miembro.foto ?? miembro.avatar;
-  return (
-    <div className="mx-auto mb-3 h-[74px] w-[74px] rounded-full p-[3px]" style={{ background: ESPECTRO }}>
-      {imagen ? (
-        <img src={imagen} alt="" className="h-full w-full rounded-full bg-white object-cover" />
-      ) : (
-        <div
-          aria-hidden="true"
-          className="flex h-full w-full items-center justify-center rounded-full text-xl font-black text-white"
-          style={{ background: colorDe(miembro.userId), fontFamily: FUENTE_TITULOS }}
-        >
-          {iniciales(miembro.nombre)}
-        </div>
-      )}
-    </div>
-  );
 }
 
 /** Una tarjeta por persona activa; la mía primero (decisión D7). */
@@ -71,7 +53,7 @@ export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrin
             className="flex flex-col justify-between rounded-[22px] border-[1.5px] border-[#E6E8EF] bg-white p-5 text-center transition hover:-translate-y-1 hover:shadow-lg"
           >
             <div>
-              <Avatar miembro={m} />
+              <AvatarPersona persona={m} />
               <p className="mb-2.5 font-extrabold leading-snug text-[#1F2229]" style={{ fontFamily: FUENTE_TITULOS }}>
                 {m.nombre}
               </p>
