@@ -335,6 +335,71 @@ celebración, aparte de la foto de perfil del portal, que no se toca.
     todos tus compañeros (3 de 12)».
   - Al cumplir los dos, la página baja sola hasta la confirmación.
 
+## Ampliación: cualidades ocultas y presentación para el admin (2026-11-27)
+
+Los empleados ya no ven los resultados de las votaciones de cualidades: ni las
+de sus compañeros ni las suyas. Se desvelan el día del almuerzo, cuando el admin
+las presenta. La página **nunca** vuelve a mostrarlas a quien no es admin; esa
+fue la decisión del usuario, frente a desvelarlas solas al empezar el evento o
+con un botón.
+
+- **Servidor** (sin migración):
+  - Se ocultan en hub-api y no solo en la pantalla. Si no, los conteos seguirían
+    llegando en la respuesta y se verían en las herramientas del navegador.
+  - `GET /api/celebracion` para quien no es admin trae `cualidades: []` en cada
+    miembro del equipo, también en el suyo, y `cualidadesOcultas: true`. El admin
+    la recibe como hasta ahora, con el top 3, y `cualidadesOcultas: false`.
+  - Cada uno sigue recibiendo `misVotos`, los brindis que dio, para poder
+    cambiarlos. Eso no es un resultado.
+  - Ruta nueva `GET /api/celebracion/cualidades`, con `requireAdmin`, igual que
+    `resumen`: 403 para los demás. Devuelve `{ equipo }`, con los invitados en el
+    orden del equipo (alfabético). Cada uno lleva `userId`, `nombre`, `avatar`,
+    `foto` y `cualidades`: **todas** las que recibió, con su número.
+  - El orden de las cualidades es el mismo del top 3: por votos y, si empatan,
+    por el orden de la lista de cualidades. Así, las 3 primeras coinciden con las
+    que ve el admin en el muro.
+  - Solo trae conteos, nunca quién votó: el voto sigue siendo anónimo. Cuentan
+    los mismos votos que en el muro (votantes activos e invitados).
+- **Página del empleado:**
+  - En cada tarjeta del muro, en lugar del top 3: «🤫 Se desvelan el día del
+    almuerzo». Desaparecen «Aún nadie ha brindado por ti» y «Sé el primero en
+    brindar por {nombre}».
+  - Al guardar el brindis que completa el mínimo, el aviso dice «🥂 ¡Ya brindaste
+    por todos! Los resultados se desvelarán el día del almuerzo».
+  - Con los brindis completos, «Nuestro equipo» muestra fija la línea «🤫 Los
+    resultados de los brindis se desvelarán el día del almuerzo». También se ve
+    después del cierre de confirmaciones del 4 de diciembre, cuando los pasos ya
+    no aparecen.
+  - El admin no ve ninguno de estos textos: su muro sigue mostrando el top 3.
+- **Presentación del admin:**
+  - El panel del admin tiene el botón «🎤 Presentar cualidades». Los datos se
+    piden a `GET /cualidades` al abrirla, no con el panel, para no descargar las
+    fotos en cada recarga. Mientras cargan se ve «Cargando…»; si falla, un aviso
+    con «Reintentar».
+  - Se abre a pantalla completa: una capa que cubre la página y, si el navegador
+    lo permite, la pantalla completa del sistema. En el iPhone, que no la
+    permite, se queda en la capa.
+  - Muestra una persona por pantalla: su foto graciosa (o la de perfil o las
+    iniciales), su nombre, el top 3 en grande y el resto de cualidades en
+    pequeño debajo, todas con su número. Si nadie brindó por ella: «Sin
+    brindis».
+  - Se mueve con «Anterior» y «Siguiente» y con las flechas del teclado. Esc o
+    «Cerrar» la cierran. Un contador indica la posición, por ejemplo «5 / 24».
+  - **Versión imprimible:** el botón «🖨️ Imprimir» abre el diálogo de impresión
+    del navegador. Se imprime a todos los invitados, uno por hoja, sin botones ni
+    el resto del portal. Sirve también para guardar un PDF.
+  - Las fotos graciosas miden 256 px: en papel se ven pequeñas pero nítidas.
+- **Pruebas:**
+  - hub-api: la vista sin cualidades para el empleado y con el top 3 para el
+    admin; `GET /cualidades` con 403 para el empleado, el orden alfabético, la
+    lista completa con el desempate y sin los no invitados.
+  - Portal: el texto oculto en las tarjetas, el aviso del último brindis, la
+    línea fija, la navegación de la presentación y que la versión imprimible
+    tenga a todos.
+- **Despliegue:** hub-api primero y después el portal. Si el portal anterior
+  sigue publicado un rato, las tarjetas salen sin cualidades, sin mostrar nada
+  que no deba.
+
 ## Fuera de alcance
 
 - Un módulo genérico de eventos con pantalla para crearlos. Para otro evento se
