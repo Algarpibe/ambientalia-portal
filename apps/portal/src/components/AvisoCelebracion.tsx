@@ -11,7 +11,7 @@ export default function AvisoCelebracion() {
     let vivo = true;
     cargarMiEstado()
       .then((estado) => {
-        if (vivo) setVisible(!estado.respondido && estado.confirmacionesAbiertas);
+        if (vivo) setVisible(estado.invitado && !estado.respondido && estado.confirmacionesAbiertas);
       })
       .catch(() => {});
     return () => {

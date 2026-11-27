@@ -72,5 +72,6 @@ export function resumenDePrueba(): Resumen {
       { userId: BRUNO, nombre: 'Bruno Díaz', estado: 'no_va', preferencia: null, mensaje: null, actualizadoEn: '2026-12-02T15:00:00.000Z' },
       { userId: CARLA, nombre: 'Carla Gómez', estado: 'sin_responder', preferencia: null, mensaje: null, actualizadoEn: null },
     ],
+    excluidos: [],
   };
 }

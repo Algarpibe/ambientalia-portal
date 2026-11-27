@@ -68,6 +68,14 @@ describe('CelebracionNavidad', () => {
     expect(cargarVista).toHaveBeenCalledTimes(2);
   });
 
+  it('si no está invitado, lo dice y lleva al Inicio sin reintentar', async () => {
+    vi.mocked(cargarVista).mockRejectedValue(new ErrorApi('no_invitado', 403));
+    render(<CelebracionNavidad />);
+    expect(await screen.findByText('Esta invitación no está disponible para tu cuenta.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Ir al Inicio' }).getAttribute('href')).toBe('/');
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
+  });
+
   it('confirmar guarda, avisa y vuelve a cargar', async () => {
     await abrir();
     fireEvent.click(screen.getByRole('button', { name: /Sí voy/ }));

@@ -50,6 +50,16 @@ export async function guardarVotos(userId: string, cualidades: string[]): Promis
   );
 }
 
+/** Solo admin: quita a alguien de la invitación (reversible). */
+export async function excluirInvitado(userId: string): Promise<void> {
+  await leer(await authFetch(`${BASE}/excluidos/${encodeURIComponent(userId)}`, { method: 'PUT' }));
+}
+
+/** Solo admin: vuelve a invitar a quien se había quitado. */
+export async function readmitirInvitado(userId: string): Promise<void> {
+  await leer(await authFetch(`${BASE}/excluidos/${encodeURIComponent(userId)}`, { method: 'DELETE' }));
+}
+
 /** La foto propia: el mismo endpoint que Configuración (solo cambia la de quien llama). */
 export async function subirMiFoto(dataUrl: string): Promise<void> {
   await leer(await authFetch('/api/users/me/avatar', { method: 'PATCH', body: JSON.stringify({ avatar: dataUrl }) }));
@@ -65,6 +75,8 @@ const MENSAJES: Record<string, string> = {
   demasiadas_cualidades: 'Puedes elegir como mucho 3 cualidades.',
   voto_propio: 'No puedes brindar por ti mismo.',
   usuario_no_valido: 'Esa persona ya no está en el equipo. Recarga la página.',
+  no_invitado: 'Esta invitación no está disponible para tu cuenta.',
+  exclusion_propia: 'No puedes quitarte a ti mismo de la invitación.',
 };
 
 const GENERICO = 'No se pudo guardar. Vuelve a intentarlo.';

@@ -55,6 +55,7 @@ export interface Vista {
 }
 
 export interface MiEstado {
+  invitado: boolean;
   respondido: boolean;
   confirmacionesAbiertas: boolean;
 }
@@ -80,4 +81,6 @@ export interface Resumen {
   totales: { van: number; noVan: number; sinResponder: number };
   porPreferencia: (Preferencia & { total: number })[];
   filas: FilaResumen[];
+  /** Quienes el admin quitó de la invitación (pueden volver a invitarse). */
+  excluidos: { userId: string; nombre: string }[];
 }
