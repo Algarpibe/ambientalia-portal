@@ -88,7 +88,7 @@ export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrin
             </div>
 
             {esMia ? (
-              <label className={`${BOTON} cursor-pointer`}>
+              <label className={`${BOTON} cursor-pointer focus-within:ring-2 focus-within:ring-[#006699]/30`}>
                 {subiendo ? 'Subiendo…' : '📷 Subir mi foto'}
                 <input type="file" accept="image/*" className="sr-only" disabled={subiendo} onChange={(e) => void elegirFoto(e)} />
               </label>
