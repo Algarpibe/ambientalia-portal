@@ -3,6 +3,7 @@ import logo from '../../assets/ambientalia-logo.png';
 import { fileToResizedDataUrl } from '../../lib/image';
 import { notify } from '../../lib/notify';
 import { cargarVista, ErrorApi, guardarConfirmacion, guardarVotos, mensajeDeError, subirFotoCelebracion } from './api';
+import { completaLosBrindis } from './brindis';
 import { lanzarConfeti, prefiereMenosMovimiento } from './confeti';
 import Confirmacion from './Confirmacion';
 import CuentaAtras from './CuentaAtras';
@@ -150,6 +151,8 @@ export default function CelebracionNavidad() {
 
   const brindar = async (cualidades: string[]) => {
     if (!brindisPara) return;
+    // Se decide antes de guardar, con la vista de antes: este aviso sustituye al de siempre (decisión P4).
+    const ultimoBrindis = vista.cualidadesOcultas && completaLosBrindis(vista, brindisPara.userId, cualidades);
     try {
       await guardarVotos(brindisPara.userId, cualidades);
     } catch (e) {
@@ -161,7 +164,11 @@ export default function CelebracionNavidad() {
       throw e;
     }
     if (cualidades.length > 0) {
-      notify(`🥂 ¡Brindis enviado para ${primerNombre(brindisPara.nombre)}!`);
+      notify(
+        ultimoBrindis
+          ? '🥂 ¡Ya brindaste por todos! Los resultados se desvelarán el día del almuerzo'
+          : `🥂 ¡Brindis enviado para ${primerNombre(brindisPara.nombre)}!`,
+      );
       lanzarConfeti();
     } else {
       notify('Brindis retirado.');
@@ -185,6 +192,7 @@ export default function CelebracionNavidad() {
 
   const { evento } = vista;
   const bloqueada = bloqueadaODesconocido === true;
+  const brindisCompletos = vista.brindis.minimo > 0 && vista.brindis.dados >= vista.brindis.minimo;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#FAFAFC] text-[#2B2D35]" style={{ fontFamily: FUENTE_TEXTO }}>
@@ -247,6 +255,12 @@ export default function CelebracionNavidad() {
               onSubirFoto={subirFoto}
               onIrAConfirmar={() => irA(confirmacionRef)}
             />
+            {/* Fija, también tras el cierre de confirmaciones, cuando PasosEquipo ya no pinta nada. */}
+            {vista.cualidadesOcultas && brindisCompletos && (
+              <p className="mx-auto mb-6 max-w-2xl rounded-2xl border border-[#3F3D99]/20 bg-[#3F3D99]/5 px-4 py-3 text-center text-sm font-bold text-[#3F3D99]">
+                🤫 Los resultados de los brindis se desvelarán el día del almuerzo
+              </p>
+            )}
             <MuroEquipo
               equipo={vista.equipo}
               yo={vista.yo}
