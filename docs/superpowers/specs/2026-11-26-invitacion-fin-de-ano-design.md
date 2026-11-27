@@ -181,7 +181,8 @@ Secciones, en orden:
 2. **Cabecera** con el logo y el botón «¡Celebrar!» (confeti).
 3. **Hero** con el título, el texto y la cuenta atrás hasta el 18 de diciembre a
    las 12:30 p. m.
-4. **Fecha, hora y lugar**, con Google Maps, Waze y «Copiar dirección».
+4. **Fecha, hora y lugar**, con Google Maps (la ficha exacta del restaurante) y
+   «Copiar dirección». Waze se quitó el 2026-11-27.
 5. **Agenda y detalles**: experiencia gastronómica, vestimenta, Google Calendar y
    «Descargar .ics».
 6. **Nuestro equipo**: una tarjeta por usuario activo, con la foto (o las
@@ -280,31 +281,59 @@ puede quitar a cualquier usuario activo de la invitación y volver a invitarlo.
   - El admin no puede quitarse a sí mismo (400 `exclusion_propia`); si pudiera,
     perdería el panel.
 
-## Ampliación: 4 brindis para poder responder (2026-11-27)
+## Ampliación: brindar por todos para poder responder (2026-11-27)
 
-Para responder, sea «Sí voy» o «No podré ir», hay que haber brindado antes por al
-menos 4 compañeros invitados distintos, dándole al menos una cualidad a cada uno.
-Se pensó primero con 3 y el usuario lo subió a 4.
+Para responder, sea «Sí voy» o «No podré ir», hay que haber brindado antes por
+todos los compañeros invitados, dándole al menos una cualidad a cada uno. El
+usuario empezó pidiendo 3 brindis, lo subió a 4 y al final lo dejó en todos.
 
 - **Servidor:**
-  - `config.ts` define `MIN_BRINDIS = 4`. El mínimo real es
-    `min(4, personas invitadas − 1)`, para que un equipo pequeño no deje a nadie
-    bloqueado.
-  - `GET /api/celebracion` trae `brindis: { dados, minimo }`. Los votos a personas
-    que no están invitadas no cuentan.
+  - El mínimo es el número de personas invitadas menos uno, sin tope. Quienes no
+    están invitados y las cuentas inactivas ni se exigen ni cuentan.
+  - Si se invita a alguien nuevo, el mínimo sube para todos.
+  - `GET /api/celebracion` trae `brindis: { dados, minimo }`.
   - `PUT /confirmacion` responde 409 `faltan_brindis` si no se llega al mínimo. El
     orden de las comprobaciones es: `no_invitado`, `confirmaciones_cerradas`,
     `faltan_brindis` y después el cuerpo.
 - **Página:**
   - Mientras falten brindis y las confirmaciones sigan abiertas, la tarjeta de
-    confirmación se ve apagada y no se puede usar. Muestra «Brinda por al menos 4
-    compañeros para confirmar · 1 de 4» y un botón «Ir al muro», que sube hasta
+    confirmación se ve apagada y no se puede usar. Muestra «Brinda por todos tus
+    compañeros para confirmar · 3 de 12» y un botón «Ir al muro», que sube hasta
     el muro.
   - El muro también muestra cuántos brindis llevas.
   - Al completar el último brindis necesario, la página baja sola hasta la
     confirmación, que ya se ve encendida. Respeta el movimiento reducido.
 - **Respuestas anteriores:** quien ya había respondido conserva su respuesta, pero
   para cambiarla le aplica la misma regla.
+
+## Ampliación: foto graciosa obligatoria (2026-11-27)
+
+Para responder también hay que subir una foto graciosa. Es una foto solo para la
+celebración, aparte de la foto de perfil del portal, que no se toca.
+
+- **BD:**
+  - Migración 083, tabla `portal.celebracion_fotos`:
+    `(evento, user_id FK portal.users ON DELETE CASCADE, foto TEXT con un data URL, actualizada_en)`,
+    con clave primaria `(evento, user_id)`.
+  - `portal_app` puede leer, insertar y actualizar, pero no borrar.
+- **Servidor:**
+  - `PUT /api/celebracion/mi-foto` con `{ foto }` crea o reemplaza la foto de
+    quien llama.
+  - Valida que sea un data URL JPEG, PNG o WebP en base64, de 300 000 caracteres
+    como mucho. Si no, responde 400 `foto_invalida`.
+  - Quien no está invitado recibe 403 `no_invitado`.
+  - En la vista, cada miembro del equipo trae `foto`, que es la graciosa o `null`.
+  - `confirmar` responde 409 `falta_foto` si no hay foto. El orden de las
+    comprobaciones es: `no_invitado`, `confirmaciones_cerradas`, `falta_foto`,
+    `faltan_brindis` y el cuerpo.
+- **Página:**
+  - El muro muestra la foto graciosa; sin ella, la de perfil o las iniciales.
+  - En la tarjeta propia, el botón dice «📷 Subir mi foto graciosa», o «Cambiar mi
+    foto graciosa» si ya hay una. Usa la ruta nueva; la foto de perfil no cambia.
+  - Mientras falte algo, la tarjeta de confirmación apagada lista los requisitos,
+    cada uno marcado como hecho o pendiente: «Sube tu foto graciosa» y «Brinda por
+    todos tus compañeros (3 de 12)».
+  - Al cumplir los dos, la página baja sola hasta la confirmación.
 
 ## Fuera de alcance
 
