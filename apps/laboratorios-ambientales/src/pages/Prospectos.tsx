@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Laboratorio } from '../types';
 import type { EstadoVigencia, GrupoProspecto } from '../lib/prospects';
 import {
@@ -13,15 +13,9 @@ import {
 } from '../lib/prospects';
 import { HOJA_EXCEL, filasExcel, nombreDeFichero } from '../lib/exportProspects';
 import { hoyLocal } from '../lib/fechas';
-import type { EstadoCliente, ResultadoCruce } from '../lib/clientes';
-import {
-  ESTADOS_CLIENTE,
-  ETIQUETA_ESTADO_CLIENTE,
-  estadoDelCruce,
-  filtrarPorCliente,
-  nitsParaConsultar,
-} from '../lib/clientes';
-import { fetchClientesZoho } from '../services/clientesZoho';
+import type { EstadoCliente } from '../lib/clientes';
+import { ESTADOS_CLIENTE, ETIQUETA_ESTADO_CLIENTE, filtrarPorCliente, nitsParaConsultar } from '../lib/clientes';
+import { useCruceZoho } from '../hooks/useCruceZoho';
 import CeldaCliente from '../components/CeldaCliente';
 
 type Props = {
@@ -50,9 +44,6 @@ export default function Prospectos({ data, onBack }: Props) {
   const [exportando, setExportando] = useState(false);
   const [errorExportar, setErrorExportar] = useState('');
   const [filtroCliente, setFiltroCliente] = useState<EstadoCliente | ''>('');
-  const [resultado, setResultado] = useState<ResultadoCruce | null>(null);
-  // Subirlo repite la consulta: es lo que hace «Reintentar».
-  const [intento, setIntento] = useState(0);
 
   // Agrupar recorre los ~19 000 registros: solo se rehace si cambian los datos.
   const todos = useMemo(() => groupProspects(data), [data]);
@@ -60,36 +51,12 @@ export default function Prospectos({ data, onBack }: Props) {
   // el departamento elegido no desaparece de la lista al cambiar de pestaña.
   const departamentos = useMemo(() => departamentosDe(todos), [todos]);
 
-  // Una sola consulta con los NIT de las dos pestañas. La dependencia es el texto
-  // y no la lista: si los datos se refrescan con los mismos NIT, no se repite.
-  const claveNits = useMemo(() => nitsParaConsultar(todos).join(','), [todos]);
-  // Cada resultado lleva la clave de su consulta: si cambian los NIT o se
-  // reintenta, el viejo deja de valer y la vista vuelve a «Consultando…».
-  const clave = `${claveNits}#${intento}`;
-  // El efecto guarda el resultado con esa misma `clave` (no la rehace): si las
-  // dos se escribieran por separado y se separaran, la vista se quedaría en
-  // «Consultando…» para siempre. `intento` entra a través de `clave`.
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchClientesZoho(claveNits === '' ? [] : claveNits.split(','), controller.signal).then(
-      (cruce) => {
-        if (!controller.signal.aborted) setResultado({ clave, cruce });
-      },
-      (error: unknown) => {
-        // Al cerrar la vista se aborta: eso no es un error que haya que enseñar.
-        if (controller.signal.aborted) return;
-        console.warn('No se pudo consultar Zoho', error);
-        setResultado({ clave, cruce: null });
-      },
-    );
-    return () => controller.abort();
-  }, [claveNits, clave]);
-
-  const estadoCruce = estadoDelCruce(resultado, clave);
-  const reintentar = () => setIntento((n) => n + 1);
+  // Una sola consulta con los NIT de las dos pestañas (ver useCruceZoho). El
+  // cruce llega solo cuando está listo; mientras, es null.
+  const nits = useMemo(() => nitsParaConsultar(todos), [todos]);
+  const { cruce: cruceListo, estadoCruce, reintentar } = useCruceZoho(nits);
 
   // Mientras no hay cruce, el filtro «Cliente» no cuenta y el Excel sale sin él.
-  const cruceListo = estadoCruce === 'listo' ? (resultado?.cruce ?? null) : null;
   const clienteElegido = cruceListo === null ? '' : filtroCliente;
 
   // El número de cada pestaña cuenta su grupo con los demás filtros aplicados.
