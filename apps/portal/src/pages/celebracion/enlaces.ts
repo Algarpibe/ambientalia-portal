@@ -1,15 +1,5 @@
 import type { Evento } from './tipos';
 
-type Lugar = Pick<Evento, 'lugar' | 'direccion'>;
-
-export function urlGoogleMaps(e: Lugar): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${e.lugar}, ${e.direccion}`)}`;
-}
-
-export function urlWaze(e: Lugar): string {
-  return `https://waze.com/ul?q=${encodeURIComponent(e.direccion)}&navigate=yes`;
-}
-
 /** 2026-12-18T12:30:00-05:00 → 20261218T173000Z (UTC, formato básico de iCalendar). */
 export function fechaIcs(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');

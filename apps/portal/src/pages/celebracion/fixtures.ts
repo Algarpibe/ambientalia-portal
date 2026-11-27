@@ -14,6 +14,7 @@ export function eventoDePrueba(cambios: Partial<Evento> = {}): Evento {
     fin: '2026-12-18T16:00:00-05:00',
     lugar: 'Restaurante Anfitriona',
     direccion: 'Cl. 83 Bis #24-09, Bogotá D.C.',
+    mapsUrl: 'https://www.google.com/maps/place/Ejemplo',
     vestimenta: 'Smart casual',
     cierreConfirmaciones: '2026-12-04T23:59:59-05:00',
     confirmacionesAbiertas: true,

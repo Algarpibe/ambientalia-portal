@@ -4,7 +4,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import CelebracionNavidad from './CelebracionNavidad';
 import { cargarVista, ErrorApi, guardarConfirmacion } from './api';
 import { notify } from '../../lib/notify';
-import { vistaDePrueba } from './fixtures';
+import { eventoDePrueba, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
@@ -40,6 +40,13 @@ describe('CelebracionNavidad', () => {
     expect(screen.getByText('Viernes, 18 de diciembre de 2026')).toBeTruthy();
     expect(screen.getByText('Restaurante Anfitriona')).toBeTruthy();
     expect(screen.getByRole('timer', { name: 'Cuenta atrás' })).toBeTruthy();
+  });
+
+  it('Google Maps abre la ficha exacta del restaurante y no hay Waze', async () => {
+    await abrir();
+    const maps = screen.getByRole('link', { name: /Google Maps/ });
+    expect(maps.getAttribute('href')).toBe(eventoDePrueba().mapsUrl);
+    expect(screen.queryByRole('link', { name: /Waze/ })).toBeNull();
   });
 
   it('tapa el contenido (inert) hasta abrir y luego enfoca el título', async () => {

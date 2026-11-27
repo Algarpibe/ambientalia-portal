@@ -16,6 +16,7 @@ export interface Evento {
   fin: string;
   lugar: string;
   direccion: string;
+  mapsUrl: string;
   vestimenta: string;
   cierreConfirmaciones: string;
   confirmacionesAbiertas: boolean;

@@ -25,6 +25,7 @@ describe('configuración', () => {
     expect(EVENTO.id).toBe('fin-de-ano-2026');
     expect(CUALIDADES).toHaveLength(18);
     expect(new Set(CUALIDADES).size).toBe(18);
+    expect(EVENTO.mapsUrl.startsWith('https://www.google.com/maps/place/Anfitriona')).toBe(true);
   });
 });
 
