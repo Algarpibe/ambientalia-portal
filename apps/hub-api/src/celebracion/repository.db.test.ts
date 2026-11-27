@@ -121,6 +121,43 @@ describe('CelebracionRepository', () => {
     expect((await repo.contarVotos(EVENTO)).filter((c) => c.votadoId === bruno)).toEqual([]);
   });
 
+  it('excluir es idempotente, listarExcluidos lo ve por evento y readmitir lo quita', async () => {
+    const bruno = await usuario('Bruno Díaz');
+    await repo.excluir(EVENTO, bruno, AHORA);
+    await repo.excluir(EVENTO, bruno, new Date('2026-12-02T15:00:00Z'));
+    expect(await repo.listarExcluidos(EVENTO)).toEqual([bruno]);
+    expect(await repo.listarExcluidos('otro-evento')).toEqual([]);
+    const { rows } = await db.query(`SELECT excluido_en FROM portal.celebracion_excluidos WHERE user_id = $1`, [bruno]);
+    expect(new Date((rows[0] as { excluido_en: Date }).excluido_en)).toEqual(AHORA);
+    await repo.readmitir(EVENTO, bruno);
+    expect(await repo.listarExcluidos(EVENTO)).toEqual([]);
+    await repo.readmitir(EVENTO, bruno);
+  });
+
+  it('contarVotos no cuenta los votos de un votante excluido y los recupera al readmitirlo', async () => {
+    const ana = await usuario('Ana Ruiz');
+    const bruno = await usuario('Bruno Díaz');
+    const carla = await usuario('Carla Gómez');
+    await repo.reemplazarVotos(EVENTO, ana, carla, ['Empatía'], AHORA);
+    await repo.reemplazarVotos(EVENTO, bruno, carla, ['Empatía'], AHORA);
+    await repo.excluir(EVENTO, bruno, AHORA);
+    expect((await repo.contarVotos(EVENTO)).filter((c) => c.votadoId === carla)).toEqual([
+      { votadoId: carla, cualidad: 'Empatía', votos: 1 },
+    ]);
+    expect(await repo.votosDe(EVENTO, bruno)).toHaveLength(1);
+    await repo.readmitir(EVENTO, bruno);
+    expect((await repo.contarVotos(EVENTO)).filter((c) => c.votadoId === carla)).toEqual([
+      { votadoId: carla, cualidad: 'Empatía', votos: 2 },
+    ]);
+  });
+
+  it('borrar la cuenta borra su exclusión', async () => {
+    const bruno = await usuario('Bruno Díaz');
+    await repo.excluir(EVENTO, bruno, AHORA);
+    await db.query('DELETE FROM portal.users WHERE id = $1', [bruno]);
+    expect(await repo.listarExcluidos(EVENTO)).toEqual([]);
+  });
+
   // Los permisos de portal_app sobre las tablas de la 081 se comprueban solo en
   // db.roles.db.test.ts: aquí el rol no existe al migrar y no se darían.
 });

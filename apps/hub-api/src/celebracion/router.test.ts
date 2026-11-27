@@ -41,9 +41,11 @@ function cabecera(userId: string, role = 'reader') {
 function stub(parcial: Partial<CelebracionActions> = {}): CelebracionActions {
   return {
     vista: vi.fn(async () => ({ hola: 'vista' }) as never),
-    miEstado: vi.fn(async () => ({ respondido: false, confirmacionesAbiertas: true })),
+    miEstado: vi.fn(async () => ({ respondido: false, confirmacionesAbiertas: true, invitado: true })),
     confirmar: vi.fn(async () => {}),
     votar: vi.fn(async () => {}),
+    excluir: vi.fn(async () => {}),
+    readmitir: vi.fn(async () => {}),
     resumen: vi.fn(async () => ({ hola: 'resumen' }) as never),
     ...parcial,
   };
@@ -80,7 +82,7 @@ describe('router de la invitación', () => {
   it('GET /celebracion/mi-estado responde el estado de la persona', async () => {
     const service = stub();
     const res = await request(montar(service)).get('/api/celebracion/mi-estado').set(cabecera(ANA));
-    expect(res.body).toEqual({ respondido: false, confirmacionesAbiertas: true });
+    expect(res.body).toEqual({ respondido: false, confirmacionesAbiertas: true, invitado: true });
     expect(service.miEstado).toHaveBeenCalledWith(ANA);
   });
 
@@ -145,6 +147,44 @@ describe('router de la invitación', () => {
     const res = await request(app).get('/api/celebracion/resumen').set(cabecera(ADMIN, 'admin'));
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ hola: 'resumen' });
+  });
+
+  it('PUT y DELETE /celebracion/excluidos/:userId son solo para admin', async () => {
+    const service = stub();
+    const app = montar(service);
+    const put = await request(app).put(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ANA));
+    const del = await request(app).delete(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ANA));
+    expect(put.status).toBe(403);
+    expect(put.body).toEqual({ error: 'forbidden' });
+    expect(del.status).toBe(403);
+    expect(del.body).toEqual({ error: 'forbidden' });
+    expect(service.excluir).not.toHaveBeenCalled();
+    expect(service.readmitir).not.toHaveBeenCalled();
+  });
+
+  it('el admin quita y readmite: pasa su id y el de la persona', async () => {
+    const service = stub();
+    const app = montar(service);
+    const put = await request(app).put(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ADMIN, 'admin'));
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual({ message: 'excluido' });
+    expect(service.excluir).toHaveBeenCalledWith(ADMIN, BRUNO);
+    const del = await request(app).delete(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ADMIN, 'admin'));
+    expect(del.status).toBe(200);
+    expect(del.body).toEqual({ message: 'readmitido' });
+    expect(service.readmitir).toHaveBeenCalledWith(BRUNO);
+  });
+
+  it('un no_invitado sale como 403 con su código', async () => {
+    const service = stub({
+      vista: vi.fn(async () => {
+        throw new CelebracionError('no_invitado');
+      }),
+    });
+    const res = await request(montar(service)).get('/api/celebracion').set(cabecera(BRUNO));
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'no_invitado' });
+    expect(captureError).not.toHaveBeenCalled();
   });
 
   it('index.ts lo monta en /api con el servicio y el repositorio reales', () => {

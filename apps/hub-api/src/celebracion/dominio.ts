@@ -13,18 +13,20 @@ export type CodigoError =
   | 'cualidad_invalida'
   | 'demasiadas_cualidades'
   | 'voto_propio'
-  | 'usuario_no_valido';
+  | 'usuario_no_valido'
+  | 'no_invitado'
+  | 'exclusion_propia';
 
 const CIERRES: ReadonlySet<CodigoError> = new Set<CodigoError>(['confirmaciones_cerradas', 'votos_cerrados']);
 
-/** Error de negocio: el router lo traduce a 409 (cierres) o 400 (lo demás), nunca a 401. */
+/** Error de negocio: el router lo traduce a 409 (cierres), 403 (no invitado) o 400 (lo demás), nunca a 401. */
 export class CelebracionError extends Error {
-  readonly status: 400 | 409;
+  readonly status: 400 | 403 | 409;
 
   constructor(readonly code: CodigoError) {
     super(code);
     this.name = 'CelebracionError';
-    this.status = CIERRES.has(code) ? 409 : 400;
+    this.status = CIERRES.has(code) ? 409 : code === 'no_invitado' ? 403 : 400;
   }
 }
 

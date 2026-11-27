@@ -22,6 +22,7 @@ export class FakeStore implements CelebracionStore {
   usuarios: FakeUsuario[] = [];
   confirmaciones: FakeConfirmacion[] = [];
   votos: FakeVoto[] = [];
+  excluidos: { evento: string; userId: string }[] = [];
 
   addUsuario(userId: string, nombre: string, opciones: { activo?: boolean; avatar?: string | null } = {}): void {
     this.usuarios.push({ userId, nombre, avatar: opciones.avatar ?? null, activo: opciones.activo ?? true });
@@ -31,7 +32,23 @@ export class FakeStore implements CelebracionStore {
     return this.usuarios.some((u) => u.userId === userId && u.activo);
   }
 
-  async listarEquipo(): Promise<Miembro[]> {
+  private estaExcluido(evento: string, userId: string): boolean {
+    return this.excluidos.some((x) => x.evento === evento && x.userId === userId);
+  }
+
+  async listarExcluidos(evento: string): Promise<string[]> {
+    return this.excluidos.filter((x) => x.evento === evento).map((x) => x.userId);
+  }
+
+  async excluir(evento: string, userId: string, _ahora: Date): Promise<void> {
+    if (!this.estaExcluido(evento, userId)) this.excluidos.push({ evento, userId });
+  }
+
+  async readmitir(evento: string, userId: string): Promise<void> {
+    this.excluidos = this.excluidos.filter((x) => !(x.evento === evento && x.userId === userId));
+  }
+
+  async listarEquipo():Promise<Miembro[]> {
     return this.usuarios
       .filter((u) => u.activo)
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
@@ -45,7 +62,7 @@ export class FakeStore implements CelebracionStore {
   async contarVotos(evento: string): Promise<ConteoVotos[]> {
     const mapa = new Map<string, ConteoVotos>();
     for (const v of this.votos) {
-      if (v.evento !== evento || !this.activo(v.votanteId)) continue;
+      if (v.evento !== evento || !this.activo(v.votanteId) || this.estaExcluido(evento, v.votanteId)) continue;
       const clave = `${v.votadoId}|${v.cualidad}`;
       const actual = mapa.get(clave) ?? { votadoId: v.votadoId, cualidad: v.cualidad, votos: 0 };
       actual.votos += 1;

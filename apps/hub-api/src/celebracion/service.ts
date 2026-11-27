@@ -38,7 +38,13 @@ export interface CelebracionStore {
   /** Usuarios activos, ordenados por nombre. */
   listarEquipo(): Promise<Miembro[]>;
   esUsuarioActivo(userId: string): Promise<boolean>;
-  /** Votos del evento por votado y cualidad. Solo cuentan los votantes activos. */
+  /** Ids de las personas quitadas de la invitación a ese evento. */
+  listarExcluidos(evento: string): Promise<string[]>;
+  /** Quita a la persona de la invitación. Idempotente: repetirlo no cambia nada. */
+  excluir(evento: string, userId: string, ahora: Date): Promise<void>;
+  /** La devuelve a la invitación; sus respuestas y votos nunca se borraron. */
+  readmitir(evento: string, userId: string): Promise<void>;
+  /** Votos del evento por votado y cualidad. Solo cuentan los votantes activos y no excluidos. */
   contarVotos(evento: string): Promise<ConteoVotos[]>;
   votosDe(evento: string, votanteId: string): Promise<VotoPropio[]>;
   confirmacionDe(evento: string, userId: string): Promise<Confirmacion | null>;
@@ -77,6 +83,7 @@ export interface Vista {
 export interface MiEstado {
   respondido: boolean;
   confirmacionesAbiertas: boolean;
+  invitado: boolean;
 }
 
 export type EstadoRespuesta = 'va' | 'no_va' | 'sin_responder';
@@ -94,6 +101,8 @@ export interface Resumen {
   totales: { van: number; noVan: number; sinResponder: number };
   porPreferencia: { codigo: string; texto: string; total: number }[];
   filas: FilaResumen[];
+  /** Usuarios activos quitados de la invitación, en el orden del equipo. */
+  excluidos: { userId: string; nombre: string }[];
 }
 
 export interface CelebracionDeps {
@@ -111,14 +120,22 @@ export class CelebracionService {
     this.now = deps.now;
   }
 
+  /** El equipo invitado (activos menos los quitados) y el conjunto de quitados, en minúsculas. */
+  private async invitados(): Promise<{ equipo: Miembro[]; excluidos: Set<string>; todos: Miembro[] }> {
+    const [todos, ids] = await Promise.all([this.store.listarEquipo(), this.store.listarExcluidos(EVENTO.id)]);
+    const excluidos = new Set(ids.map((id) => id.toLowerCase()));
+    return { equipo: todos.filter((m) => !excluidos.has(m.userId.toLowerCase())), excluidos, todos };
+  }
+
   async vista(sesion: Sesion): Promise<Vista> {
     const ahora = this.now();
-    const [equipo, conteos, mios, confirmacion] = await Promise.all([
-      this.store.listarEquipo(),
+    const [{ equipo, excluidos }, conteos, mios, confirmacion] = await Promise.all([
+      this.invitados(),
       this.store.contarVotos(EVENTO.id),
       this.store.votosDe(EVENTO.id, sesion.userId),
       this.store.confirmacionDe(EVENTO.id, sesion.userId),
     ]);
+    if (excluidos.has(sesion.userId.toLowerCase())) throw new CelebracionError('no_invitado');
 
     const porVotado = new Map<string, CualidadVotada[]>();
     for (const c of conteos) {
@@ -159,31 +176,64 @@ export class CelebracionService {
   }
 
   async miEstado(userId: string): Promise<MiEstado> {
-    const confirmacion = await this.store.confirmacionDe(EVENTO.id, userId);
-    return { respondido: confirmacion !== null, confirmacionesAbiertas: confirmacionesAbiertas(this.now()) };
+    const [confirmacion, ids] = await Promise.all([
+      this.store.confirmacionDe(EVENTO.id, userId),
+      this.store.listarExcluidos(EVENTO.id),
+    ]);
+    return {
+      respondido: confirmacion !== null,
+      confirmacionesAbiertas: confirmacionesAbiertas(this.now()),
+      invitado: !this.esta(ids, userId),
+    };
+  }
+
+  private esta(ids: readonly string[], userId: string): boolean {
+    return ids.some((id) => id.toLowerCase() === userId.toLowerCase());
   }
 
   async confirmar(userId: string, body: unknown): Promise<void> {
     const ahora = this.now();
+    if (this.esta(await this.store.listarExcluidos(EVENTO.id), userId)) throw new CelebracionError('no_invitado');
     if (!confirmacionesAbiertas(ahora)) throw new CelebracionError('confirmaciones_cerradas');
     await this.store.guardarConfirmacion(EVENTO.id, userId, parseConfirmacion(body), ahora);
   }
 
-  /** Orden de las comprobaciones (decisión D3): cierre, UUID, voto propio, cualidades, compañero activo. */
+  /**
+   * Orden de las comprobaciones (decisión D3): cierre, votante invitado, UUID, voto propio,
+   * cualidades, compañero activo e invitado.
+   */
   async votar(votanteId: string, votadoId: unknown, body: unknown): Promise<void> {
     const ahora = this.now();
     if (!votosAbiertos(ahora)) throw new CelebracionError('votos_cerrados');
+    const excluidos = await this.store.listarExcluidos(EVENTO.id);
+    if (this.esta(excluidos, votanteId)) throw new CelebracionError('no_invitado');
     if (!esUuid(votadoId)) throw new CelebracionError('usuario_no_valido');
     const votado = votadoId.toLowerCase();
     if (votado === votanteId.toLowerCase()) throw new CelebracionError('voto_propio');
     const cualidades = parseCualidades(body);
-    if (!(await this.store.esUsuarioActivo(votado))) throw new CelebracionError('usuario_no_valido');
+    if (this.esta(excluidos, votado) || !(await this.store.esUsuarioActivo(votado))) {
+      throw new CelebracionError('usuario_no_valido');
+    }
     await this.store.reemplazarVotos(EVENTO.id, votanteId, votado, cualidades, ahora);
   }
 
+  /** Quita a una persona activa de la invitación (el admin no puede quitarse a sí mismo). */
+  async excluir(adminId: string, userId: unknown): Promise<void> {
+    if (!esUuid(userId)) throw new CelebracionError('usuario_no_valido');
+    const id = userId.toLowerCase();
+    if (id === adminId.toLowerCase()) throw new CelebracionError('exclusion_propia');
+    if (!(await this.store.esUsuarioActivo(id))) throw new CelebracionError('usuario_no_valido');
+    await this.store.excluir(EVENTO.id, id, this.now());
+  }
+
+  async readmitir(userId: unknown): Promise<void> {
+    if (!esUuid(userId)) throw new CelebracionError('usuario_no_valido');
+    await this.store.readmitir(EVENTO.id, userId.toLowerCase());
+  }
+
   async resumen(): Promise<Resumen> {
-    const [equipo, confirmaciones] = await Promise.all([
-      this.store.listarEquipo(),
+    const [{ equipo, excluidos, todos }, confirmaciones] = await Promise.all([
+      this.invitados(),
       this.store.listarConfirmaciones(EVENTO.id),
     ]);
     const porUsuario = new Map(confirmaciones.map((c) => [c.userId, c] as const));
@@ -210,6 +260,9 @@ export class CelebracionService {
         total: filas.filter((f) => f.estado === 'va' && f.preferencia === p.codigo).length,
       })),
       filas,
+      excluidos: todos
+        .filter((m) => excluidos.has(m.userId.toLowerCase()))
+        .map((m) => ({ userId: m.userId, nombre: m.nombre })),
     };
   }
 }
