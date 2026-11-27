@@ -13,6 +13,7 @@ import ModalCualidades from './ModalCualidades';
 import MuroEquipo from './MuroEquipo';
 import PanelAdmin from './PanelAdmin';
 import PaseDigital from './PaseDigital';
+import PasosEquipo from './PasosEquipo';
 import { primerNombre } from './persona';
 import Portada from './Portada';
 import TarjetasEvento from './TarjetasEvento';
@@ -184,13 +185,6 @@ export default function CelebracionNavidad() {
 
   const { evento } = vista;
   const bloqueada = bloqueadaODesconocido === true;
-  const pendientes = [
-    { hecho: tieneFoto, texto: 'Sube tu foto graciosa' },
-    {
-      hecho: vista.brindis.dados >= vista.brindis.minimo,
-      texto: `Brinda por todos tus compañeros (${vista.brindis.dados} de ${vista.brindis.minimo})`,
-    },
-  ];
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#FAFAFC] text-[#2B2D35]" style={{ fontFamily: FUENTE_TEXTO }}>
@@ -243,17 +237,16 @@ export default function CelebracionNavidad() {
               <Etiqueta tono="pink">🌟 El corazón de Ambientalia</Etiqueta>
               <Titulo id="titulo-equipo">Nuestro equipo</Titulo>
               <p className="text-sm text-[#5C6170]">
-                Brinda por tus compañeros eligiendo hasta {evento.maxCualidades} cualidades: tu voto es anónimo.
+                Elige hasta {evento.maxCualidades} cualidades para cada compañero: tu voto es anónimo.
               </p>
-              {bloqueada && !pendientes[1].hecho && (
-                <p className="mt-2 text-sm font-semibold text-[#C95B00]">
-                  Llevas {vista.brindis.dados} de {vista.brindis.minimo} brindis para poder confirmar.
-                </p>
-              )}
-              {bloqueada && !tieneFoto && (
-                <p className="mt-2 text-sm font-semibold text-[#C95B00]">Sube tu foto graciosa desde tu tarjeta.</p>
-              )}
             </div>
+            <PasosEquipo
+              tieneFoto={tieneFoto}
+              brindis={vista.brindis}
+              abiertas={evento.confirmacionesAbiertas}
+              onSubirFoto={subirFoto}
+              onIrAConfirmar={() => irA(confirmacionRef)}
+            />
             <MuroEquipo
               equipo={vista.equipo}
               yo={vista.yo}
@@ -269,45 +262,29 @@ export default function CelebracionNavidad() {
           <Tarjeta>
             <Etiqueta tono="teal">🎟️ Confirmación y pase digital</Etiqueta>
             <Titulo id="titulo-confirmacion">¿Nos acompañas?</Titulo>
-            {evento.confirmacionesAbiertas && (
-              <p className="mb-5 text-sm text-[#5C6170]">
-                Confirma hasta el {diaYMes(evento.cierreConfirmaciones)}. Puedes cambiar tu respuesta hasta esa fecha.
-              </p>
-            )}
-            {bloqueada && (
-              <div
-                role="status"
-                className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#FDB913] bg-[#FFF6E5] px-4 py-3 text-sm font-semibold text-[#8A4B00]"
+            {bloqueada ? (
+              <button
+                type="button"
+                onClick={() => irA(muroRef)}
+                className="mb-5 min-h-[44px] text-left text-sm font-bold text-[#006699] underline underline-offset-2 hover:text-[#00527A]"
               >
-                <div>
-                  <p>🔒 Para responder te falta:</p>
-                  <ul className="mt-1 space-y-0.5">
-                    {pendientes.map((p) => (
-                      <li key={p.texto}>
-                        {p.hecho ? '✅' : '⬜'} {p.texto}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <button type="button" className={BOTON} onClick={() => irA(muroRef)}>
-                  Ir al muro
-                </button>
-              </div>
+                ↑ Completa los 2 pasos de «Nuestro equipo» para responder
+              </button>
+            ) : (
+              evento.confirmacionesAbiertas && (
+                <p className="mb-5 text-sm text-[#5C6170]">
+                  Confirma hasta el {diaYMes(evento.cierreConfirmaciones)}. Puedes cambiar tu respuesta hasta esa fecha.
+                </p>
+              )
             )}
-            <div
-              inert={bloqueada}
-              aria-hidden={bloqueada || undefined}
-              className={bloqueada ? 'pointer-events-none select-none opacity-40' : undefined}
-            >
-              <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />
-              {vista.miRespuesta?.asiste && (
-                <PaseDigital
-                  nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
-                  evento={evento}
-                  respuesta={vista.miRespuesta}
-                />
-              )}
-            </div>
+            {!bloqueada && <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />}
+            {vista.miRespuesta?.asiste && (
+              <PaseDigital
+                nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
+                evento={evento}
+                respuesta={vista.miRespuesta}
+              />
+            )}
           </Tarjeta>
         </section>
 

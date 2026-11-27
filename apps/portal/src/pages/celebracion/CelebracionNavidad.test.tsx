@@ -105,38 +105,47 @@ describe('CelebracionNavidad', () => {
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
   });
 
-  it('con brindis pendientes, la confirmación se apaga, dice cuántos llevo y «Ir al muro» sube al muro', async () => {
+  it('con brindis pendientes no hay «Sí voy» ni caja de candado, y «Completa los 2 pasos…» sube al muro', async () => {
     const scroll = vi.fn();
     Element.prototype.scrollIntoView = scroll;
     try {
       vi.mocked(cargarVista).mockResolvedValue(vistaDePrueba({ brindis: { dados: 1, minimo: 12 } }));
       await abrir();
-      const aviso = screen.getByRole('status').textContent ?? '';
-      expect(aviso).toContain('🔒 Para responder te falta:');
-      expect(aviso).toContain('✅ Sube tu foto graciosa');
-      expect(aviso).toContain('⬜ Brinda por todos tus compañeros (1 de 12)');
-      expect(screen.getByText('Llevas 1 de 12 brindis para poder confirmar.')).toBeTruthy();
-      expect(screen.queryByText(/Sube tu foto graciosa desde tu tarjeta\./)).toBeNull();
       expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Ir al muro' }));
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/Para responder te falta/)).toBeNull();
+      expect(screen.queryByText(/Confirma hasta el/)).toBeNull();
+      expect(screen.getByText('Antes de confirmar tu asistencia, completa estos 2 pasos:')).toBeTruthy();
+      expect(screen.getByText('1 de 12')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /Completa los 2 pasos de «Nuestro equipo» para responder/ }));
       expect(scroll).toHaveBeenCalledTimes(1);
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
   });
 
-  it('sin mi foto graciosa el candado sigue aunque los brindis estén completos, y la lista lo marca', async () => {
+  it('sin mi foto graciosa la confirmación sigue oculta aunque los brindis estén completos, y la tarjeta ofrece subirla', async () => {
     vi.mocked(cargarVista).mockResolvedValue(
       vistaDePrueba({ equipo: equipoDePrueba(false), brindis: { dados: 2, minimo: 2 } }),
     );
     await abrir();
-    const aviso = screen.getByRole('status').textContent ?? '';
-    expect(aviso).toContain('🔒 Para responder te falta:');
-    expect(aviso).toContain('⬜ Sube tu foto graciosa');
-    expect(aviso).toContain('✅ Brinda por todos tus compañeros (2 de 2)');
+    expect(screen.getByText('Subir foto')).toBeTruthy();
     expect(screen.queryByText(/Llevas 2 de 2/)).toBeNull();
-    expect(screen.getByText('Sube tu foto graciosa desde tu tarjeta.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Completa los 2 pasos/ })).toBeTruthy();
+  });
+
+  it('quien ya dijo «Sí voy» y queda bloqueado sigue viendo su pase', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(
+      vistaDePrueba({
+        brindis: { dados: 1, minimo: 12 },
+        miRespuesta: { asiste: true, preferencia: 'general', mensaje: null, actualizadoEn: '2026-11-20T10:00:00Z' },
+      }),
+    );
+    await abrir();
+    expect(screen.getByTestId('pase')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Completa los 2 pasos/ })).toBeTruthy();
   });
 
   it('con foto y brindis completos no hay candado', async () => {
@@ -150,7 +159,7 @@ describe('CelebracionNavidad', () => {
       vistaDePrueba({ evento: eventoDePrueba({ confirmacionesAbiertas: false }), brindis: { dados: 0, minimo: 12 } }),
     );
     await abrir();
-    expect(screen.queryByRole('button', { name: 'Ir al muro' })).toBeNull();
-    expect(screen.queryByText(/Llevas 0 de 12/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Completa los 2 pasos/ })).toBeNull();
+    expect(screen.queryByText('Antes de confirmar tu asistencia, completa estos 2 pasos:')).toBeNull();
   });
 });
