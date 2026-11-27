@@ -71,5 +71,7 @@ const GENERICO = 'No se pudo guardar. Vuelve a intentarlo.';
 
 /** Texto para el aviso de un error al guardar. */
 export function mensajeDeError(e: unknown): string {
-  return e instanceof ErrorApi ? (MENSAJES[e.codigo] ?? GENERICO) : GENERICO;
+  if (!(e instanceof ErrorApi)) return GENERICO;
+  if (e.status === 429) return 'Demasiadas peticiones a la vez. Espera un momento y vuelve a intentarlo.';
+  return MENSAJES[e.codigo] ?? GENERICO;
 }

@@ -3,7 +3,7 @@ import logo from '../../assets/ambientalia-logo.png';
 import { notifyProfileUpdated } from '../../hooks/useProfile';
 import { fileToResizedDataUrl } from '../../lib/image';
 import { notify } from '../../lib/notify';
-import { cargarVista, guardarConfirmacion, guardarVotos, mensajeDeError, subirMiFoto } from './api';
+import { cargarVista, ErrorApi, guardarConfirmacion, guardarVotos, mensajeDeError, subirMiFoto } from './api';
 import { lanzarConfeti } from './confeti';
 import Confirmacion from './Confirmacion';
 import CuentaAtras from './CuentaAtras';
@@ -12,6 +12,8 @@ import { diaYMes } from './fechas';
 import { ESPECTRO, FUENTE_TEXTO, FUENTE_TITULOS, TITULO_DEGRADADO } from './marca';
 import ModalCualidades from './ModalCualidades';
 import MuroEquipo from './MuroEquipo';
+import PanelAdmin from './PanelAdmin';
+import PaseDigital from './PaseDigital';
 import { primerNombre } from './persona';
 import Portada from './Portada';
 import TarjetasEvento from './TarjetasEvento';
@@ -47,12 +49,14 @@ export default function CelebracionNavidad() {
   const [fallo, setFallo] = useState(false);
   const [abierta, setAbierta] = useState(false);
   const [brindisPara, setBrindisPara] = useState<Miembro | null>(null);
+  const [version, setVersion] = useState(0);
   const tituloRef = useRef<HTMLHeadingElement>(null);
 
   const recargar = useCallback(async () => {
     try {
       setVista(await cargarVista());
       setFallo(false);
+      setVersion((v) => v + 1);
     } catch {
       setFallo(true);
     }
@@ -103,6 +107,7 @@ export default function CelebracionNavidad() {
       await guardarConfirmacion(datos);
     } catch (e) {
       notify(mensajeDeError(e), 'error');
+      if (e instanceof ErrorApi && e.status === 409) void recargar();
       throw e;
     }
     if (datos.asiste) {
@@ -120,6 +125,10 @@ export default function CelebracionNavidad() {
       await guardarVotos(brindisPara.userId, cualidades);
     } catch (e) {
       notify(mensajeDeError(e), 'error');
+      if (e instanceof ErrorApi && e.status === 409) {
+        setBrindisPara(null);
+        void recargar();
+      }
       throw e;
     }
     if (cualidades.length > 0) {
@@ -218,12 +227,21 @@ export default function CelebracionNavidad() {
             <Titulo id="titulo-confirmacion">¿Nos acompañas?</Titulo>
             {evento.confirmacionesAbiertas && (
               <p className="mb-5 text-sm text-[#5C6170]">
-                Confirma antes del {diaYMes(evento.cierreConfirmaciones)}. Puedes cambiar tu respuesta hasta esa fecha.
+                Confirma hasta el {diaYMes(evento.cierreConfirmaciones)}. Puedes cambiar tu respuesta hasta esa fecha.
               </p>
             )}
             <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />
+            {vista.miRespuesta?.asiste && (
+              <PaseDigital
+                nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
+                evento={evento}
+                respuesta={vista.miRespuesta}
+              />
+            )}
           </Tarjeta>
         </section>
+
+        {vista.esAdmin && <PanelAdmin evento={evento} version={version} />}
 
         <footer className="mt-10 text-center text-sm text-gray-500">
           <strong>Ambientalia S.A.S.</strong> · {evento.titulo}

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import CelebracionNavidad from './CelebracionNavidad';
-import { cargarVista, guardarVotos, subirMiFoto } from './api';
+import { cargarVista, ErrorApi, guardarVotos, subirMiFoto } from './api';
 import { notify } from '../../lib/notify';
 import { BRUNO, vistaDePrueba } from './fixtures';
 
@@ -46,6 +46,18 @@ describe('CelebracionNavidad · muro', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(notify).toHaveBeenCalledWith('🥂 ¡Brindis enviado para Bruno!');
     expect(cargarVista).toHaveBeenCalledTimes(2);
+  });
+
+  it('si la votación cerró mientras tanto (409), avisa, cierra el modal y recarga', async () => {
+    vi.mocked(guardarVotos).mockRejectedValue(new ErrorApi('votos_cerrados', 409));
+    await abrir();
+    fireEvent.click(within(screen.getByRole('article', { name: 'Bruno Díaz' })).getByRole('button', { name: /Enviar brindis/ }));
+    const dialogo = screen.getByRole('dialog', { name: /Brinda por Bruno/ });
+    fireEvent.click(within(dialogo).getByRole('button', { name: /Compromiso/ }));
+    fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar brindis' }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('La votación ya se cerró.', 'error'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
   });
 
   it('subir mi foto la redimensiona, la guarda y recarga', async () => {
