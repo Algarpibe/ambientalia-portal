@@ -30,6 +30,7 @@ const NIT_MAX_DIGITOS = 10;
  * NIT base: lo que hay antes del primer «-», solo dígitos. `900.000.001-7` da
  * `900000001`. Menos de 6 dígitos es relleno (hay contactos con «0») y más de
  * 10 no es un NIT: los dos dan null.
+ * La app tiene la misma regla en apps/laboratorios-ambientales/src/lib/clientes.ts: si cambias una, cambia la otra.
  */
 export function nitBase(nit: string | null | undefined): string | null {
   if (!nit) return null;

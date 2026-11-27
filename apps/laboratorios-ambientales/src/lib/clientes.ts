@@ -33,9 +33,11 @@ export const ETIQUETA_ESTADO_CLIENTE: Record<EstadoCliente, string> = {
 };
 
 /**
- * NIT base, la misma regla que hub-api: lo de antes del primer «-», solo
- * dígitos, de 6 a 10. `900.241.439-8` da `900241439`. Un NIT que no vale no se
- * envía: hub-api rechazaría la petición entera.
+ * NIT base, la misma regla que hub-api (apps/hub-api/src/laboratorios/
+ * clientes.ts): lo de antes del primer «-», solo dígitos, de 6 a 10.
+ * `900.241.439-8` da `900241439`. Un NIT que no vale no se envía: hub-api
+ * rechazaría la petición entera. Si cambias esta regla, cambia también la de
+ * hub-api y las pruebas de las dos.
  */
 export function nitBase(nit: string): string | null {
   const digitos = nit.split('-')[0].replace(/\D/g, '');
@@ -51,13 +53,15 @@ export function hechosDe(nit: string, cruce: CruceZoho): HechosZoho | null {
  * El estado comercial del laboratorio. «Activo» si la última factura cae en los
  * últimos 36 meses de calendario, con el límite incluido: con hoy 2026-11-26,
  * una factura del 2023-11-26 todavía cuenta.
+ * `hoy` va en AAAA-MM-DD (hoyLocal); con otro formato el límite sale mal.
  */
 export function estadoCliente(nit: string, cruce: CruceZoho, hoy: string): EstadoCliente {
   const base = nitBase(nit);
   if (base === null) return 'sin-nit';
   const hechos = cruce.get(base);
   if (!hechos) return 'no-en-zoho';
-  if (hechos.ultimaFactura === null) return 'sin-compras';
+  // == y no ===: si hub-api dejara de enviar el campo, sería «sin compras» y no «antiguo».
+  if (hechos.ultimaFactura == null) return 'sin-compras';
   // Las fechas son AAAA-MM-DD: comparar como texto es comparar como fecha.
   return hechos.ultimaFactura >= sumarMeses(hoy, -MESES_CLIENTE_ACTIVO) ? 'activo' : 'antiguo';
 }

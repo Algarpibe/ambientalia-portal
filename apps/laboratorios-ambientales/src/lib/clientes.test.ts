@@ -50,6 +50,16 @@ describe('nitBase', () => {
     expect(nitBase('123')).toBeNull();
     expect(nitBase('12345678901')).toBeNull();
   });
+
+  it('mismos casos que el nitBase de hub-api (si uno cambia, el otro también)', () => {
+    expect(nitBase('900000001')).toBe('900000001');
+    expect(nitBase(' 900 000 001 ')).toBe('900000001');
+    expect(nitBase('12345')).toBeNull();
+    expect(nitBase('123456')).toBe('123456');
+    expect(nitBase('1234567890')).toBe('1234567890');
+    expect(nitBase('N/A')).toBeNull();
+    expect(nitBase('No Aplica')).toBeNull();
+  });
 });
 
 describe('estadoCliente', () => {
@@ -70,6 +80,11 @@ describe('estadoCliente', () => {
     expect(estadoCliente('900000001', cruce({ '900000001': hechos({ ultimaFactura: '2023-11-25' }) }), HOY)).toBe('antiguo');
   });
 
+  it('un ultimaFactura que no llega (undefined) cuenta como sin compras, no como antiguo', () => {
+    const sinCampo = { ocmaVendido: null, ultimosRepuestos: null } as unknown as HechosZoho;
+    expect(estadoCliente('900000001', cruce({ '900000001': sinCampo }), HOY)).toBe('sin-compras');
+  });
+
   it('activo con una factura reciente', () => {
     expect(estadoCliente('900000001', cruce({ '900000001': hechos({ ultimaFactura: '2026-10-01' }) }), HOY)).toBe('activo');
   });
@@ -88,7 +103,7 @@ describe('hechosDe', () => {
   });
 
   it('null sin NIT o fuera de Zoho', () => {
-    expect(hechosDe('', cruce({}))).toBeNull();
+    expect(hechosDe('123', cruce({ '123': hechos() }))).toBeNull();
     expect(hechosDe('900000001', cruce({}))).toBeNull();
   });
 });
@@ -102,6 +117,15 @@ describe('nitsParaConsultar', () => {
       prospecto({ nit: '' }),
     ]);
     expect(nits).toEqual(['900000001', '900000002']);
+  });
+
+  it('los NIT de relleno o «No Aplica» no se envían: hub-api daría 400', () => {
+    const nits = nitsParaConsultar([
+      prospecto({ nit: '0' }),
+      prospecto({ nit: 'No Aplica' }),
+      prospecto({ nit: '900.000.001-7' }),
+    ]);
+    expect(nits).toEqual(['900000001']);
   });
 });
 
