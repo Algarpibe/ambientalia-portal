@@ -12,6 +12,7 @@ import { diaYMes } from './fechas';
 import { ESPECTRO, FUENTE_TEXTO, FUENTE_TITULOS, TITULO_DEGRADADO } from './marca';
 import ModalCualidades from './ModalCualidades';
 import MuroEquipo from './MuroEquipo';
+import PanelAdmin from './PanelAdmin';
 import PaseDigital from './PaseDigital';
 import { primerNombre } from './persona';
 import Portada from './Portada';
@@ -48,12 +49,14 @@ export default function CelebracionNavidad() {
   const [fallo, setFallo] = useState(false);
   const [abierta, setAbierta] = useState(false);
   const [brindisPara, setBrindisPara] = useState<Miembro | null>(null);
+  const [version, setVersion] = useState(0);
   const tituloRef = useRef<HTMLHeadingElement>(null);
 
   const recargar = useCallback(async () => {
     try {
       setVista(await cargarVista());
       setFallo(false);
+      setVersion((v) => v + 1);
     } catch {
       setFallo(true);
     }
@@ -232,6 +235,8 @@ export default function CelebracionNavidad() {
             )}
           </Tarjeta>
         </section>
+
+        {vista.esAdmin && <PanelAdmin evento={evento} version={version} />}
 
         <footer className="mt-10 text-center text-sm text-gray-500">
           <strong>Ambientalia S.A.S.</strong> · {evento.titulo}

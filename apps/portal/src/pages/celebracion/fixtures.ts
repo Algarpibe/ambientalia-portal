@@ -1,4 +1,4 @@
-import type { Evento, Vista } from './tipos';
+import type { Evento, Resumen, Vista } from './tipos';
 
 // Datos ficticios para las pruebas de la invitación (el repo es público).
 
@@ -49,5 +49,27 @@ export function vistaDePrueba(cambios: Partial<Vista> = {}): Vista {
     miRespuesta: null,
     misVotos: {},
     ...cambios,
+  };
+}
+
+export function resumenDePrueba(): Resumen {
+  return {
+    totales: { van: 1, noVan: 1, sinResponder: 1 },
+    porPreferencia: [
+      { codigo: 'general', texto: 'Menú general (sin restricciones)', total: 0 },
+      { codigo: 'vegetariano', texto: 'Opción vegetariana', total: 1 },
+    ],
+    filas: [
+      {
+        userId: YO,
+        nombre: 'Ana Ruiz',
+        estado: 'va',
+        preferencia: 'vegetariano',
+        mensaje: '¡Allá estaré!',
+        actualizadoEn: '2026-12-01T15:00:00.000Z',
+      },
+      { userId: BRUNO, nombre: 'Bruno Díaz', estado: 'no_va', preferencia: null, mensaje: null, actualizadoEn: '2026-12-02T15:00:00.000Z' },
+      { userId: CARLA, nombre: 'Carla Gómez', estado: 'sin_responder', preferencia: null, mensaje: null, actualizadoEn: null },
+    ],
   };
 }
