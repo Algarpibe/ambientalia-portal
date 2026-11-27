@@ -35,7 +35,8 @@ Cifras del dataset `2waz-acaa` de datos.gov.co, contadas en vivo el 2026-11-27:
 - **Códigos de designación EPA.** La marca y el modelo solo se deducen del
   código EPA que cita el método: `RFPS-0202-141`, por ejemplo, es el muestreador
   Tisch TE-6070.
-  - Las filas de aire citan 74 códigos distintos.
+  - Las filas de aire citan 75 grafías de código distintas: 74 códigos, más una
+    errata, «RFNA 0506-158», que se lee como un código de más.
   - La tabla de la app (`EQUIPMENT_MAP`) tiene 44 códigos, y 37 de ellos
     aparecen en el dataset.
   - 73 de los 74 están en la lista oficial de la EPA. El que no está,
@@ -71,8 +72,11 @@ Cifras del dataset `2waz-acaa` de datos.gov.co, contadas en vivo el 2026-11-27:
 - un número de serie no vacío.
 
 **Series.** El campo de equipo se parte por comas, puntos y comas y saltos de
-línea. Cada trozo se recorta y los vacíos se descartan. No se parte por `/` ni
-por espacios, porque hay series como «43c-61340-330/2».
+línea, y también por un guion, raya (`–`, `—`) o `/` con un espacio al menos en
+un lado («1001 - 1002», «2001 -2002», «3001- 3002», «4001 / 4002»). Cada trozo
+se recorta y los vacíos se descartan. Un guion o `/` pegado por los dos lados es
+parte de la serie, y tampoco se parte por espacios solos: hay series como
+«43c-61340-330/2».
 
 **Un equipo.** Es la pareja código de laboratorio + serie, con la serie en
 mayúsculas para comparar. Todas las filas de esa pareja forman un solo equipo.
