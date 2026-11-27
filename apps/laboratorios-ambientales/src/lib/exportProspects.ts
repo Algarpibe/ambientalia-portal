@@ -29,10 +29,6 @@ export const COLUMNAS_EXCEL = [
 
 const SEPARADOR = '; ';
 
-// La cabecera y una fila por laboratorio, en el orden recibido, que es el de la
-// pantalla. Todo es texto, y aoa_to_sheet escribe un texto como celda de texto:
-// un nombre que empiece por «=» nunca sale como fórmula, y un NIT o un teléfono
-// no pierden ceros ni se vuelven números.
 // Las cuatro columnas del cruce con Zoho. Sin cruce (consultando o con error)
 // van vacías: un «No está en Zoho» sin haber preguntado sería falso.
 function celdasCliente(prospecto: Prospecto, hoy: string, cruce: CruceZoho | null): string[] {
@@ -46,6 +42,10 @@ function celdasCliente(prospecto: Prospecto, hoy: string, cruce: CruceZoho | nul
   ];
 }
 
+// La cabecera y una fila por laboratorio, en el orden recibido, que es el de la
+// pantalla. Todo es texto, y aoa_to_sheet escribe un texto como celda de texto:
+// un nombre que empiece por «=» nunca sale como fórmula, y un NIT o un teléfono
+// no pierden ceros ni se vuelven números. `cruce` es null mientras no hay cruce.
 export function filasExcel(prospectos: Prospecto[], hoy: string, cruce: CruceZoho | null = null): string[][] {
   return [
     [...COLUMNAS_EXCEL],
