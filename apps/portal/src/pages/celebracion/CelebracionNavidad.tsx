@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import logo from '../../assets/ambientalia-logo.png';
 import { notify } from '../../lib/notify';
 import { cargarVista, guardarConfirmacion, mensajeDeError } from './api';
@@ -41,6 +41,7 @@ export default function CelebracionNavidad() {
   const [vista, setVista] = useState<Vista | null>(null);
   const [fallo, setFallo] = useState(false);
   const [abierta, setAbierta] = useState(false);
+  const tituloRef = useRef<HTMLHeadingElement>(null);
 
   const recargar = useCallback(async () => {
     try {
@@ -54,6 +55,10 @@ export default function CelebracionNavidad() {
   useEffect(() => {
     void recargar();
   }, [recargar]);
+
+  useEffect(() => {
+    if (abierta) tituloRef.current?.focus();
+  }, [abierta]);
 
   useEffect(() => {
     const anterior = document.title;
@@ -112,6 +117,7 @@ export default function CelebracionNavidad() {
 
       <main
         aria-hidden={!abierta}
+        inert={!abierta}
         className={`relative z-10 mx-auto max-w-5xl px-4 pb-20 pt-5 transition-all duration-700 sm:px-5 ${
           abierta ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0'
         }`}
@@ -132,7 +138,9 @@ export default function CelebracionNavidad() {
             🥂 Almuerzo corporativo de fin de año
           </span>
           <h1
-            className="my-4 bg-clip-text text-4xl font-black leading-tight text-transparent sm:text-5xl"
+            ref={tituloRef}
+            tabIndex={-1}
+            className="my-4 break-words bg-clip-text text-3xl font-black leading-tight text-transparent outline-none sm:text-5xl"
             style={{ fontFamily: FUENTE_TITULOS, backgroundImage: TITULO_DEGRADADO }}
           >
             Brindemos por un 2026 extraordinario

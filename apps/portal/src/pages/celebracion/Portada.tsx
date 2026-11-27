@@ -1,17 +1,24 @@
+import { useId } from 'react';
 import logo from '../../assets/ambientalia-logo.png';
 import { ESPECTRO, FUENTE_TITULOS } from './marca';
 
 /** El «sobre» que tapa la página hasta que se pulsa «Abrir invitación». */
 export default function Portada({ onAbrir }: { onAbrir: () => void }) {
+  const idTitulo = useId();
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-gradient-to-br from-white via-[#f4f6fb] to-[#eef2f7] p-6">
-      <div className="relative w-full max-w-md overflow-hidden rounded-[28px] bg-white px-7 py-10 text-center shadow-[0_25px_60px_-15px_rgba(63,61,153,0.16)] ring-1 ring-black/5">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={idTitulo}
+      className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-gradient-to-br from-white via-[#f4f6fb] to-[#eef2f7] p-6"
+    >
+      <div className="relative my-auto w-full max-w-md overflow-hidden rounded-[28px] bg-white px-7 py-10 text-center shadow-[0_25px_60px_-15px_rgba(63,61,153,0.16)] ring-1 ring-black/5">
         <div className="absolute inset-x-0 top-0 h-[7px]" style={{ background: ESPECTRO }} />
         <span className="inline-flex items-center gap-2 rounded-full bg-[#F47920]/10 px-4 py-1.5 text-xs font-bold uppercase tracking-wide text-[#D85B00]">
           ✨ Celebración de fin de año 2026
         </span>
         <img src={logo} alt="Ambientalia" className="mx-auto mt-6 h-16 w-auto" />
-        <h1 className="mt-6 text-3xl font-black leading-tight text-[#22252E]" style={{ fontFamily: FUENTE_TITULOS }}>
+        <h1 id={idTitulo} className="mt-6 text-2xl font-black sm:text-3xl leading-tight text-[#22252E]" style={{ fontFamily: FUENTE_TITULOS }}>
           ¡Tenemos una cita especial para celebrar juntos!
         </h1>
         <p className="mt-3 leading-relaxed text-[#5C6170]">

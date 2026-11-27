@@ -78,9 +78,11 @@ function App() {
           path={RUTA_CELEBRACION}
           element={
             <RequireAuth>
-              <Suspense fallback={<LoadingFallback />}>
-                <CelebracionNavidad />
-              </Suspense>
+              <ErrorBoundary>
+                <Suspense fallback={<LoadingFallback />}>
+                  <CelebracionNavidad />
+                </Suspense>
+              </ErrorBoundary>
             </RequireAuth>
           }
         />

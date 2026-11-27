@@ -36,7 +36,7 @@ export default function CuentaAtras({ objetivo }: { objetivo: string }) {
           <span className="block text-2xl font-black text-[#22252E] sm:text-4xl" style={{ fontFamily: FUENTE_TITULOS }}>
             {cuenta ? String(cuenta[c.clave]).padStart(2, '0') : '--'}
           </span>
-          <span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs">{c.texto}</span>
+          <span className="mt-1 block text-[10px] font-bold uppercase tracking-normal sm:tracking-wider text-gray-500 sm:text-xs">{c.texto}</span>
         </div>
       ))}
     </div>

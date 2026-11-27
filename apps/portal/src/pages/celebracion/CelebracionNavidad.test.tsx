@@ -42,6 +42,17 @@ describe('CelebracionNavidad', () => {
     expect(screen.getByRole('timer', { name: 'Cuenta atrás' })).toBeTruthy();
   });
 
+  it('tapa el contenido (inert) hasta abrir y luego enfoca el título', async () => {
+    const { container } = render(<CelebracionNavidad />);
+    await screen.findByRole('button', { name: /Abrir invitación/ });
+    const main = container.querySelector('main') as HTMLElement;
+    expect(main.hasAttribute('inert')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /Abrir invitación/ }));
+    expect(main.hasAttribute('inert')).toBe(false);
+    const titulo = screen.getByRole('heading', { name: 'Brindemos por un 2026 extraordinario' });
+    await waitFor(() => expect(document.activeElement).toBe(titulo));
+  });
+
   it('si no carga, ofrece reintentar', async () => {
     vi.mocked(cargarVista).mockRejectedValueOnce(new Error('red'));
     render(<CelebracionNavidad />);
