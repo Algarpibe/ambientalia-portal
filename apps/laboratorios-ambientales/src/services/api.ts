@@ -1,5 +1,6 @@
 import type { Laboratorio } from '../types';
 import { normalizeActividad, normalizeComponente, normalizeEstado, normalizeMatriz } from '../lib/normalize';
+import { esValorVacio } from '../lib/baseInstalada';
 
 // Dataset «Laboratorios ambientales acreditados por el IDEAM» de datos.gov.co.
 // Sirve CORS abierto (Access-Control-Allow-Origin: *): no hacen falta proxies.
@@ -18,7 +19,7 @@ export const REQUEST_TIMEOUT_MS = 60_000;
 // viejos como si fueran nuevos y la app sale vacía hasta que expire. **Al cambiar
 // la forma de Laboratorio hay que subir CACHE_VERSION y añadir las claves
 // anteriores a LEGACY_CACHE_KEYS.**
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_KEY_DATA = `labs_cache_${CACHE_VERSION}_data`;
 const CACHE_KEY_TIMESTAMP = `labs_cache_${CACHE_VERSION}_timestamp`;
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
@@ -27,9 +28,19 @@ const CACHE_DURATION = 24 * 60 * 60 * 1000;
 // leerlas: ocupaban ~3 MB de los ~5 MB que el portal comparte por origen, así que
 // abandonarlas haría fallar por cuota la escritura del cache nuevo.
 // v1 (hasta 2026-07-15): esquema con nombre_laboratorio/parametro/estado 'VIGENTE'.
-const LEGACY_CACHE_KEYS = ['labs_cache_data', 'labs_cache_timestamp'];
+// v2 (hasta 2026-11-27): sin estacion ni serie; la Base instalada saldría vacía.
+const LEGACY_CACHE_KEYS = [
+  'labs_cache_data',
+  'labs_cache_timestamp',
+  'labs_cache_v2_data',
+  'labs_cache_v2_timestamp',
+];
 
 export function mapRecord(record: Record<string, string | undefined>): Laboratorio {
+  // estacion y serie solo se guardan si traen valor (esValorVacio): así el cache
+  // crece solo en los ~1.000 registros de aire que los traen.
+  const estacion = (record.nombre_de_la_estaci_n ?? '').trim();
+  const serie = (record.identificaci_n_de_equipo ?? '').trim();
   return {
     codigo: record.c_digo_de_laboratorio ?? '',
     estado: normalizeEstado(record.estado_de_la_acreditaci_n ?? ''),
@@ -58,6 +69,8 @@ export function mapRecord(record: Record<string, string | undefined>): Laborator
     actoAdministrativo: record.actos_administrativos_que ?? '',
     desde: record.desde ?? '',
     hasta: record.hasta ?? '',
+    ...(esValorVacio(estacion) ? {} : { estacion }),
+    ...(esValorVacio(serie) ? {} : { serie }),
   };
 }
 

@@ -105,8 +105,9 @@ function distintos(valores: string[]): string[] {
 
 function aProspecto(filas: Laboratorio[]): Prospecto {
   // El primer valor no vacío en el orden del dataset: el contacto o el teléfono
-  // faltan a menudo en una fila y están en otra del mismo laboratorio.
-  const primero = (campo: keyof Laboratorio): string => {
+  // faltan a menudo en una fila y están en otra del mismo laboratorio. estacion
+  // y serie quedan fuera: son opcionales y aquí no hacen falta.
+  const primero = (campo: Exclude<keyof Laboratorio, 'estacion' | 'serie'>): string => {
     for (const fila of filas) {
       const valor = fila[campo].trim();
       if (valor) return valor;
