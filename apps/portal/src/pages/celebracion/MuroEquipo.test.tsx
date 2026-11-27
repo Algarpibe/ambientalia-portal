@@ -3,7 +3,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import MuroEquipo from './MuroEquipo';
 import { notify } from '../../lib/notify';
-import { BRUNO, CARLA, vistaDePrueba, YO } from './fixtures';
+import { BRUNO, CARLA, equipoDePrueba, FOTO_DE_PRUEBA, vistaDePrueba, YO } from './fixtures';
+import type { Miembro } from './tipos';
 
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 
@@ -12,10 +13,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function pintar(cambios: { votosAbiertos?: boolean; misVotos?: Record<string, string[]> } = {}) {
+function pintar(cambios: { votosAbiertos?: boolean; misVotos?: Record<string, string[]>; equipo?: Miembro[] } = {}) {
   const vista = vistaDePrueba();
   const props = {
-    equipo: vista.equipo,
+    equipo: cambios.equipo ?? vista.equipo,
     yo: YO,
     misVotos: cambios.misVotos ?? {},
     votosAbiertos: cambios.votosAbiertos ?? true,
@@ -29,10 +30,31 @@ function pintar(cambios: { votosAbiertos?: boolean; misVotos?: Record<string, st
 const tarjeta = (nombre: string) => screen.getByRole('article', { name: nombre });
 
 describe('MuroEquipo', () => {
-  it('mi tarjeta va primera y tiene «Subir mi foto» en vez del brindis', () => {
+  it('el botón dice «Subir mi foto graciosa» si aún no la tengo y «Cambiar…» si ya la subí', () => {
+    pintar({ equipo: equipoDePrueba(false) });
+    expect(within(tarjeta('Ana Ruiz')).getByText('📷 Subir mi foto graciosa')).toBeTruthy();
+    cleanup();
+    pintar();
+    expect(within(tarjeta('Ana Ruiz')).getByText('📷 Cambiar mi foto graciosa')).toBeTruthy();
+  });
+
+  it('el avatar muestra la foto graciosa antes que la del perfil', () => {
+    const equipo = equipoDePrueba().map((m) =>
+      m.userId === BRUNO ? { ...m, avatar: 'data:image/jpeg;base64,PERFIL', foto: 'data:image/jpeg;base64,GRACIOSA' } : m,
+    );
+    pintar({ equipo });
+    expect(tarjeta('Bruno Díaz').querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,GRACIOSA');
+    expect(tarjeta('Ana Ruiz').querySelector('img')?.getAttribute('src')).toBe(FOTO_DE_PRUEBA);
+    const sinFoto = equipoDePrueba().map((m) => (m.userId === BRUNO ? { ...m, avatar: 'data:image/jpeg;base64,PERFIL' } : m));
+    cleanup();
+    pintar({ equipo: sinFoto });
+    expect(tarjeta('Bruno Díaz').querySelector('img')?.getAttribute('src')).toBe('data:image/jpeg;base64,PERFIL');
+  });
+
+  it('mi tarjeta va primera y tiene el botón de la foto en vez del brindis', () => {
     pintar();
     expect(screen.getAllByRole('article')[0].getAttribute('aria-label')).toBe('Ana Ruiz');
-    expect(within(tarjeta('Ana Ruiz')).getByLabelText(/Subir mi foto/)).toBeTruthy();
+    expect(within(tarjeta('Ana Ruiz')).getByLabelText(/foto graciosa/)).toBeTruthy();
     expect(within(tarjeta('Ana Ruiz')).queryByRole('button', { name: /brindis/ })).toBeNull();
     expect(within(tarjeta('Ana Ruiz')).getByText('Aún nadie ha brindado por ti.')).toBeTruthy();
   });
@@ -59,7 +81,7 @@ describe('MuroEquipo', () => {
 
   it('subir una imagen llama a onSubirFoto; otro tipo de fichero avisa y no sube', async () => {
     const props = pintar();
-    const entrada = within(tarjeta('Ana Ruiz')).getByLabelText(/Subir mi foto/);
+    const entrada = within(tarjeta('Ana Ruiz')).getByLabelText(/foto graciosa/);
     fireEvent.change(entrada, { target: { files: [new File(['x'], 'nota.txt', { type: 'text/plain' })] } });
     expect(notify).toHaveBeenCalledWith('El archivo debe ser una imagen.', 'error');
     expect(props.onSubirFoto).not.toHaveBeenCalled();

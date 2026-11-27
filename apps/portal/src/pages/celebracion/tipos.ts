@@ -35,6 +35,8 @@ export interface Miembro {
   userId: string;
   nombre: string;
   avatar: string | null;
+  /** Su foto graciosa del evento (distinta del avatar del perfil); null si aún no la sube. */
+  foto: string | null;
   cualidades: CualidadVotada[];
 }
 
@@ -52,6 +54,8 @@ export interface Vista {
   equipo: Miembro[];
   miRespuesta: Respuesta | null;
   misVotos: Record<string, string[]>;
+  /** Brindis por compañeros invitados distintos que llevo y los que hacen falta (todos) para responder. */
+  brindis: { dados: number; minimo: number };
 }
 
 export interface MiEstado {

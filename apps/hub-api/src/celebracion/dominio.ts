@@ -1,4 +1,4 @@
-import { CUALIDADES, EVENTO, MAX_CUALIDADES, MENSAJE_MAX, PREFERENCIAS } from './config.js';
+import { CUALIDADES, EVENTO, FOTO_MAX, MAX_CUALIDADES, MENSAJE_MAX, PREFERENCIAS } from './config.js';
 
 // Reglas puras de la invitación: los cierres, la validación de lo que manda el
 // portal y el top 3 de cualidades. Nada de BD ni de reloj: la hora llega como
@@ -6,6 +6,9 @@ import { CUALIDADES, EVENTO, MAX_CUALIDADES, MENSAJE_MAX, PREFERENCIAS } from '.
 
 export type CodigoError =
   | 'confirmaciones_cerradas'
+  | 'faltan_brindis'
+  | 'falta_foto'
+  | 'foto_invalida'
   | 'votos_cerrados'
   | 'asiste_invalido'
   | 'preferencia_invalida'
@@ -17,7 +20,12 @@ export type CodigoError =
   | 'no_invitado'
   | 'exclusion_propia';
 
-const CIERRES: ReadonlySet<CodigoError> = new Set<CodigoError>(['confirmaciones_cerradas', 'votos_cerrados']);
+const CIERRES: ReadonlySet<CodigoError> = new Set<CodigoError>([
+  'confirmaciones_cerradas',
+  'votos_cerrados',
+  'faltan_brindis',
+  'falta_foto',
+]);
 
 /** Error de negocio: el router lo traduce a 409 (cierres), 403 (no invitado) o 400 (lo demás), nunca a 401. */
 export class CelebracionError extends Error {
@@ -64,6 +72,17 @@ export function parseConfirmacion(body: unknown): DatosConfirmacion {
   }
   if (preferencia !== null) throw new CelebracionError('preferencia_invalida');
   return { asiste: false, preferencia: null, mensaje: parseMensaje(b.mensaje) };
+}
+
+const FOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/** Valida el cuerpo de PUT /celebracion/mi-foto: un data URL de imagen en base64 de hasta FOTO_MAX caracteres. */
+export function parseFoto(body: unknown): string {
+  const foto = ((body ?? {}) as Record<string, unknown>).foto;
+  if (typeof foto !== 'string' || foto.length > FOTO_MAX || !FOTO_DATA_URL.test(foto)) {
+    throw new CelebracionError('foto_invalida');
+  }
+  return foto;
 }
 
 /** Controles C0, DEL, C1 y los separadores de línea y de párrafo de Unicode. */

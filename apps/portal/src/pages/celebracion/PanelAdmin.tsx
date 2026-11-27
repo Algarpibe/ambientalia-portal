@@ -18,7 +18,7 @@ interface Props {
 }
 
 const BOTON_CHICO =
-  'rounded-lg border border-[#D5D8E2] bg-white px-2.5 py-1 text-xs font-bold text-[#3E4352] transition hover:bg-[#F4F6FA] disabled:cursor-not-allowed disabled:opacity-60';
+  'rounded-lg border border-[#D5D8E2] bg-white px-2.5 py-1.5 min-h-[36px] text-xs font-bold text-[#3E4352] transition hover:bg-[#F4F6FA] disabled:cursor-not-allowed disabled:opacity-60';
 
 const ESTADO: Record<EstadoRespuesta, { texto: string; clase: string }> = {
   va: { texto: 'Va', clase: 'bg-[#008556]/10 text-[#008556]' },

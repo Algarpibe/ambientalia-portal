@@ -107,6 +107,19 @@ export class CelebracionRepository implements CelebracionStore {
     return (rows as FilaConfirmacion[]).map(aConfirmacion);
   }
 
+  async listarFotos(evento: string): Promise<{ userId: string; foto: string }[]> {
+    const { rows } = await this.pool.query(`SELECT user_id, foto FROM portal.celebracion_fotos WHERE evento = $1`, [evento]);
+    return (rows as { user_id: string; foto: string }[]).map((r) => ({ userId: r.user_id, foto: r.foto }));
+  }
+
+  async guardarFoto(evento: string, userId: string, foto: string, ahora: Date): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO portal.celebracion_fotos (evento, user_id, foto, actualizada_en) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (evento, user_id) DO UPDATE SET foto = EXCLUDED.foto, actualizada_en = EXCLUDED.actualizada_en`,
+      [evento, userId, foto, ahora],
+    );
+  }
+
   async guardarConfirmacion(evento: string, userId: string, datos: DatosConfirmacion, ahora: Date): Promise<void> {
     await this.pool.query(
       `INSERT INTO portal.celebracion_confirmaciones (evento, user_id, asiste, preferencia, mensaje, actualizado_en)

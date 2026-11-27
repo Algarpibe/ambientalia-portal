@@ -1,4 +1,4 @@
-import type { Evento, Resumen, Vista } from './tipos';
+import type { Evento, Miembro, Resumen, Vista } from './tipos';
 
 // Datos ficticios para las pruebas de la invitación (el repo es público).
 
@@ -29,26 +29,36 @@ export function eventoDePrueba(cambios: Partial<Evento> = {}): Evento {
   };
 }
 
+export const FOTO_DE_PRUEBA = 'data:image/jpeg;base64,AAAA';
+
+/** El equipo de prueba; por defecto yo ya subí mi foto graciosa y los demás no. */
+export function equipoDePrueba(conMiFoto = true): Miembro[] {
+  return [
+    { userId: YO, nombre: 'Ana Ruiz', avatar: null, foto: conMiFoto ? FOTO_DE_PRUEBA : null, cualidades: [] },
+    {
+      userId: BRUNO,
+      nombre: 'Bruno Díaz',
+      avatar: null,
+      foto: null,
+      cualidades: [
+        { cualidad: 'Empatía', votos: 4 },
+        { cualidad: 'Liderazgo', votos: 2 },
+      ],
+    },
+    { userId: CARLA, nombre: 'Carla Gómez', avatar: null, foto: null, cualidades: [] },
+  ];
+}
+
 export function vistaDePrueba(cambios: Partial<Vista> = {}): Vista {
   return {
     evento: eventoDePrueba(),
     yo: YO,
     esAdmin: false,
-    equipo: [
-      { userId: YO, nombre: 'Ana Ruiz', avatar: null, cualidades: [] },
-      {
-        userId: BRUNO,
-        nombre: 'Bruno Díaz',
-        avatar: null,
-        cualidades: [
-          { cualidad: 'Empatía', votos: 4 },
-          { cualidad: 'Liderazgo', votos: 2 },
-        ],
-      },
-      { userId: CARLA, nombre: 'Carla Gómez', avatar: null, cualidades: [] },
-    ],
+    equipo: equipoDePrueba(),
     miRespuesta: null,
     misVotos: {},
+    // El equipo de prueba son 3 personas: ya brindé por las otras 2 y la confirmación está libre.
+    brindis: { dados: 2, minimo: 2 },
     ...cambios,
   };
 }

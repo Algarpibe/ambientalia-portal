@@ -23,6 +23,19 @@ function montar(ahora = ANTES_DEL_CORTE) {
   return { store, service, reloj };
 }
 
+const FOTO = 'data:image/jpeg;base64,AAAA';
+
+/** Da un brindis (una cualidad) de `votante` a cada uno de `votados`, sin foto. */
+async function brindarSinFoto(store: FakeStore, votante: string, ...votados: string[]): Promise<void> {
+  for (const votado of votados) await store.reemplazarVotos(EVENTO.id, votante, votado, ['Empatía'], ANTES_DEL_CORTE);
+}
+
+/** Prepara a `votante` para responder: sus brindis y su foto graciosa (la confirmación exige las dos cosas). */
+async function brindar(store: FakeStore, votante: string, ...votados: string[]): Promise<void> {
+  await brindarSinFoto(store, votante, ...votados);
+  await store.guardarFoto(EVENTO.id, votante, FOTO, ANTES_DEL_CORTE);
+}
+
 describe('vista', () => {
   it('devuelve el evento con sus cierres, listas y topes, y quién soy', async () => {
     const { service } = montar();
@@ -64,9 +77,10 @@ describe('vista', () => {
     const { store, service } = montar();
     await store.reemplazarVotos(EVENTO.id, ANA, BRUNO, ['Empatía'], ANTES_DEL_CORTE);
     await store.reemplazarVotos(EVENTO.id, CARLA, BRUNO, ['Liderazgo'], ANTES_DEL_CORTE);
+    await brindar(store, ANA, CARLA);
     await service.confirmar(ANA, { asiste: true, preferencia: 'vegetariano', mensaje: '¡Allá estaré!' });
     const vista = await service.vista({ userId: ANA, esAdmin: false });
-    expect(vista.misVotos).toEqual({ [BRUNO]: ['Empatía'] });
+    expect(vista.misVotos).toEqual({ [BRUNO]: ['Empatía'], [CARLA]: ['Empatía'] });
     expect(vista.miRespuesta).toEqual({
       asiste: true,
       preferencia: 'vegetariano',
@@ -79,11 +93,37 @@ describe('vista', () => {
     const { service } = montar();
     expect((await service.vista({ userId: CARLA, esAdmin: false })).miRespuesta).toBeNull();
   });
+
+  it('brindis cuenta compañeros distintos con el mínimo del equipo, sin contar a Diana inactiva', async () => {
+    const { store, service } = montar();
+    // Equipo invitado = Ana, Bruno y Carla: el mínimo baja a 2.
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis).toEqual({ dados: 0, minimo: 2 });
+    await store.reemplazarVotos(EVENTO.id, ANA, BRUNO, ['Empatía', 'Liderazgo'], ANTES_DEL_CORTE);
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis).toEqual({ dados: 1, minimo: 2 });
+    await brindar(store, ANA, DIANA);
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis).toEqual({ dados: 1, minimo: 2 });
+  });
+
+  it('el mínimo es todos los demás invitados: readmitir a alguien lo sube', async () => {
+    const { service } = montar();
+    await service.excluir(ANA, BRUNO);
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis.minimo).toBe(1);
+    await service.readmitir(BRUNO);
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis.minimo).toBe(2);
+  });
+
+  it('los brindis a un excluido no cuentan', async () => {
+    const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
+    await service.excluir(ANA, BRUNO);
+    expect((await service.vista({ userId: ANA, esAdmin: false })).brindis).toEqual({ dados: 1, minimo: 1 });
+  });
 });
 
 describe('miEstado', () => {
   it('dice si he respondido y si las confirmaciones siguen abiertas', async () => {
-    const { service, reloj } = montar();
+    const { store, service, reloj } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
     expect(await service.miEstado(ANA)).toEqual({ respondido: false, confirmacionesAbiertas: true, invitado: true });
     await service.confirmar(ANA, { asiste: false });
     expect(await service.miEstado(ANA)).toEqual({ respondido: true, confirmacionesAbiertas: true, invitado: true });
@@ -95,6 +135,7 @@ describe('miEstado', () => {
 describe('confirmar', () => {
   it('guarda y luego reemplaza mi respuesta', async () => {
     const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
     await service.confirmar(ANA, { asiste: true, preferencia: 'general' });
     await service.confirmar(ANA, { asiste: false, mensaje: 'Me surgió un viaje' });
     expect(store.confirmaciones).toHaveLength(1);
@@ -116,10 +157,116 @@ describe('confirmar', () => {
 
   it('un cuerpo inválido no guarda nada', async () => {
     const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
     await expect(service.confirmar(ANA, { asiste: true, preferencia: 'carne' })).rejects.toMatchObject({
       code: 'preferencia_invalida',
     });
     expect(store.confirmaciones).toHaveLength(0);
+  });
+
+  it('con menos brindis que el mínimo es 409 faltan_brindis y no guarda nada', async () => {
+    const { store, service } = montar();
+    await brindar(store, ANA, BRUNO);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'faltan_brindis', status: 409 });
+    expect(store.confirmaciones).toHaveLength(0);
+  });
+
+  it('al llegar al mínimo ya deja responder', async () => {
+    const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
+    await expect(service.confirmar(ANA, { asiste: false })).resolves.toBeUndefined();
+  });
+
+  it('los brindis a un inactivo o a un excluido no cuentan', async () => {
+    const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, DIANA);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'faltan_brindis' });
+    await brindar(store, ANA, CARLA);
+    await service.excluir(ANA, BRUNO);
+    // Equipo invitado = Ana y Carla: el mínimo baja a 1 y el brindis a Carla basta.
+    await expect(service.confirmar(ANA, { asiste: false })).resolves.toBeUndefined();
+  });
+
+  it('hay que brindar por todos: un invitado nuevo o readmitido vuelve a bloquear', async () => {
+    const { store, service } = montar();
+    await service.excluir(ANA, BRUNO);
+    await brindar(store, ANA, CARLA);
+    await expect(service.confirmar(ANA, { asiste: false })).resolves.toBeUndefined();
+    await service.readmitir(BRUNO);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'faltan_brindis' });
+    const nuevo = '00000000-0000-4000-8000-0000000000e1';
+    await brindar(store, ANA, BRUNO);
+    store.addUsuario(nuevo, 'Elena Soto');
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'faltan_brindis' });
+    await brindar(store, ANA, nuevo);
+    await expect(service.confirmar(ANA, { asiste: false })).resolves.toBeUndefined();
+  });
+
+  it('sin foto graciosa es 409 falta_foto aunque los brindis estén completos, y no guarda nada', async () => {
+    const { store, service } = montar();
+    await brindarSinFoto(store, ANA, BRUNO, CARLA);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'falta_foto', status: 409 });
+    expect(store.confirmaciones).toHaveLength(0);
+    await service.subirFoto(ANA, { foto: FOTO });
+    await expect(service.confirmar(ANA, { asiste: false })).resolves.toBeUndefined();
+  });
+
+  it('la foto sola no basta: con la foto pero sin los brindis es faltan_brindis', async () => {
+    const { store, service } = montar();
+    await store.guardarFoto(EVENTO.id, ANA, FOTO, ANTES_DEL_CORTE);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'faltan_brindis' });
+  });
+
+  it('la foto de otro no cuenta: cada quien sube la suya', async () => {
+    const { store, service } = montar();
+    await brindarSinFoto(store, ANA, BRUNO, CARLA);
+    await store.guardarFoto(EVENTO.id, BRUNO, FOTO, ANTES_DEL_CORTE);
+    await expect(service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'falta_foto' });
+  });
+
+  it('orden: excluido, cerradas, falta_foto, faltan_brindis y por último el cuerpo inválido', async () => {
+    const cerradas = montar(TRAS_EL_CORTE);
+    await expect(cerradas.service.confirmar(ANA, { asiste: false })).rejects.toMatchObject({ code: 'confirmaciones_cerradas' });
+    const { store, service } = montar();
+    await expect(service.confirmar(ANA, { asiste: 'x' })).rejects.toMatchObject({ code: 'falta_foto' });
+    await store.guardarFoto(EVENTO.id, ANA, FOTO, ANTES_DEL_CORTE);
+    await expect(service.confirmar(ANA, { asiste: 'x' })).rejects.toMatchObject({ code: 'faltan_brindis' });
+    await brindarSinFoto(store, ANA, BRUNO, CARLA);
+    await expect(service.confirmar(ANA, { asiste: 'x' })).rejects.toMatchObject({ code: 'asiste_invalido' });
+  });
+});
+
+describe('subirFoto', () => {
+  it('guarda la foto del evento y la reemplaza en la siguiente', async () => {
+    const { store, service } = montar();
+    await service.subirFoto(ANA, { foto: FOTO });
+    await service.subirFoto(ANA, { foto: 'data:image/png;base64,BBBB' });
+    expect(await store.listarFotos(EVENTO.id)).toEqual([{ userId: ANA, foto: 'data:image/png;base64,BBBB' }]);
+  });
+
+  it('una foto inválida es 400 foto_invalida y no guarda nada', async () => {
+    const { store, service } = montar();
+    await expect(service.subirFoto(ANA, { foto: 'hola' })).rejects.toMatchObject({ code: 'foto_invalida', status: 400 });
+    expect(await store.listarFotos(EVENTO.id)).toEqual([]);
+  });
+
+  it('un excluido es 403 no_invitado, antes de mirar la foto', async () => {
+    const { store, service } = montar();
+    await service.excluir(ANA, BRUNO);
+    await expect(service.subirFoto(BRUNO, { foto: 'hola' })).rejects.toMatchObject({ code: 'no_invitado', status: 403 });
+    await expect(service.subirFoto(BRUNO, { foto: FOTO })).rejects.toMatchObject({ code: 'no_invitado' });
+    expect(await store.listarFotos(EVENTO.id)).toEqual([]);
+  });
+
+  it('la vista trae la foto de cada miembro, o null si aún no la subió', async () => {
+    const { service } = montar();
+    await service.subirFoto(BRUNO, { foto: FOTO });
+    const { equipo } = await service.vista({ userId: ANA, esAdmin: false });
+    expect(equipo.map((m) => [m.nombre, m.foto])).toEqual([
+      ['Ana Ruiz', null],
+      ['Bruno Díaz', FOTO],
+      ['Carla Gómez', null],
+    ]);
   });
 });
 
@@ -177,6 +324,8 @@ describe('votar', () => {
 describe('resumen', () => {
   it('cuenta van, no van y sin responder entre los activos, con los menús de quienes van', async () => {
     const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
+    await brindar(store, BRUNO, ANA, CARLA);
     await service.confirmar(ANA, { asiste: true, preferencia: 'vegetariano', mensaje: '¡Allá estaré!' });
     await service.confirmar(BRUNO, { asiste: false });
     // Diana está inactiva: su respuesta no cuenta.
@@ -294,7 +443,9 @@ describe('personas quitadas de la invitación', () => {
   });
 
   it('el resumen deja fuera a los excluidos de filas y totales y los lista aparte; su respuesta se conserva', async () => {
-    const { service } = montar();
+    const { store, service } = montar();
+    await brindar(store, ANA, BRUNO, CARLA);
+    await brindar(store, BRUNO, ANA, CARLA);
     await service.confirmar(ANA, { asiste: true, preferencia: 'general' });
     await service.confirmar(BRUNO, { asiste: true, preferencia: 'vegetariano' });
     await service.excluir(ADMIN, BRUNO);

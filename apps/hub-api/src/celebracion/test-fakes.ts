@@ -23,6 +23,7 @@ export class FakeStore implements CelebracionStore {
   confirmaciones: FakeConfirmacion[] = [];
   votos: FakeVoto[] = [];
   excluidos: { evento: string; userId: string }[] = [];
+  fotos: { evento: string; userId: string; foto: string }[] = [];
 
   addUsuario(userId: string, nombre: string, opciones: { activo?: boolean; avatar?: string | null } = {}): void {
     this.usuarios.push({ userId, nombre, avatar: opciones.avatar ?? null, activo: opciones.activo ?? true });
@@ -48,7 +49,7 @@ export class FakeStore implements CelebracionStore {
     this.excluidos = this.excluidos.filter((x) => !(x.evento === evento && x.userId === userId));
   }
 
-  async listarEquipo():Promise<Miembro[]> {
+  async listarEquipo(): Promise<Miembro[]> {
     return this.usuarios
       .filter((u) => u.activo)
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
@@ -84,6 +85,15 @@ export class FakeStore implements CelebracionStore {
 
   async listarConfirmaciones(evento: string): Promise<Confirmacion[]> {
     return this.confirmaciones.filter((c) => c.evento === evento).map(sinEvento);
+  }
+
+  async listarFotos(evento: string): Promise<{ userId: string; foto: string }[]> {
+    return this.fotos.filter((f) => f.evento === evento).map((f) => ({ userId: f.userId, foto: f.foto }));
+  }
+
+  async guardarFoto(evento: string, userId: string, foto: string, _ahora: Date): Promise<void> {
+    this.fotos = this.fotos.filter((f) => !(f.evento === evento && f.userId === userId));
+    this.fotos.push({ evento, userId, foto });
   }
 
   async guardarConfirmacion(evento: string, userId: string, datos: DatosConfirmacion, ahora: Date): Promise<void> {

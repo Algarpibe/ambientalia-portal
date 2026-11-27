@@ -10,7 +10,7 @@ import {
   guardarConfirmacion,
   guardarVotos,
   mensajeDeError,
-  subirMiFoto,
+  subirFotoCelebracion,
 } from './api';
 
 vi.mock('../../lib/api', () => ({ authFetch: vi.fn() }));
@@ -68,13 +68,18 @@ describe('api de la invitación', () => {
     expect(mensajeDeError(new ErrorApi('exclusion_propia', 400))).toBe('No puedes quitarte a ti mismo de la invitación.');
   });
 
-  it('subirMiFoto usa el endpoint de avatar de siempre', async () => {
-    mockFetch.mockResolvedValue(respuesta(200, { message: 'avatar_updated' }));
-    await subirMiFoto('data:image/jpeg;base64,AAAA');
-    expect(mockFetch).toHaveBeenCalledWith('/api/users/me/avatar', {
-      method: 'PATCH',
-      body: JSON.stringify({ avatar: 'data:image/jpeg;base64,AAAA' }),
+  it('subirFotoCelebracion manda la foto graciosa al endpoint del evento, no al perfil', async () => {
+    mockFetch.mockResolvedValue(respuesta(200, { message: 'foto_guardada' }));
+    await subirFotoCelebracion('data:image/jpeg;base64,AAAA');
+    expect(mockFetch).toHaveBeenCalledWith('/api/celebracion/mi-foto', {
+      method: 'PUT',
+      body: JSON.stringify({ foto: 'data:image/jpeg;base64,AAAA' }),
     });
+  });
+
+  it('mensajeDeError traduce falta_foto y foto_invalida', () => {
+    expect(mensajeDeError(new ErrorApi('falta_foto', 409))).toBe('Primero sube tu foto graciosa en el muro.');
+    expect(mensajeDeError(new ErrorApi('foto_invalida', 400))).toBe('La foto no es válida. Prueba con otra imagen.');
   });
 
   it('un error del servidor sale como ErrorApi con su código y su estado', async () => {
@@ -99,6 +104,7 @@ describe('api de la invitación', () => {
   it('mensajeDeError traduce los códigos y usa el genérico para lo demás', () => {
     expect(mensajeDeError(new ErrorApi('voto_propio', 400))).toBe('No puedes brindar por ti mismo.');
     expect(mensajeDeError(new ErrorApi('confirmaciones_cerradas', 409))).toBe('Las confirmaciones ya están cerradas.');
+    expect(mensajeDeError(new ErrorApi('faltan_brindis', 409))).toBe('Primero brinda por tus compañeros en el muro.');
     expect(mensajeDeError(new ErrorApi('raro', 500))).toBe('No se pudo guardar. Vuelve a intentarlo.');
     expect(mensajeDeError(new Error('red'))).toBe('No se pudo guardar. Vuelve a intentarlo.');
   });

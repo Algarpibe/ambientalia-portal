@@ -9,7 +9,7 @@ import type { CelebracionService, Sesion } from './service.js';
 // El resumen y quitar o readmitir personas, además, exigen admin.
 
 /** Lo que el router necesita del servicio (los tests le pasan un stub). */
-export type CelebracionActions = Pick<CelebracionService, 'vista' | 'miEstado' | 'confirmar' | 'votar' | 'resumen' | 'excluir' | 'readmitir'>;
+export type CelebracionActions = Pick<CelebracionService, 'vista' | 'miEstado' | 'confirmar' | 'votar' | 'resumen' | 'excluir' | 'readmitir' | 'subirFoto'>;
 
 function sesionDe(req: Request): Sesion | null {
   const p = getPayload(req);
@@ -56,6 +56,15 @@ export function createCelebracionRouter(service: CelebracionActions): Router {
     ruta('celebracion_confirmar', async (s, req) => {
       await service.confirmar(s.userId, req.body);
       return { message: 'confirmacion_guardada' };
+    }),
+  );
+
+  router.put(
+    '/celebracion/mi-foto',
+    requireAuth,
+    ruta('celebracion_foto', async (s, req) => {
+      await service.subirFoto(s.userId, req.body);
+      return { message: 'foto_guardada' };
     }),
   );
 
