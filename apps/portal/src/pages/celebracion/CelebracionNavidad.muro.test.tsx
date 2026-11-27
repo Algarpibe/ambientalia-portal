@@ -6,7 +6,7 @@ import { cargarVista, ErrorApi, guardarVotos, subirFotoCelebracion } from './api
 import { notify } from '../../lib/notify';
 import { notifyProfileUpdated } from '../../hooks/useProfile';
 import { fileToResizedDataUrl } from '../../lib/image';
-import { BRUNO, equipoDePrueba, vistaDePrueba } from './fixtures';
+import { BRUNO, equipoDePrueba, vistaDeEmpleado, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
@@ -112,5 +112,11 @@ describe('CelebracionNavidad · muro', () => {
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
+  });
+
+  it('al empleado, las tarjetas le dicen que las cualidades se desvelan el día del almuerzo', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(vistaDeEmpleado());
+    await abrir();
+    expect(within(screen.getByRole('article', { name: 'Bruno Díaz' })).getByText('🤫 Se desvelan el día del almuerzo')).toBeTruthy();
   });
 });

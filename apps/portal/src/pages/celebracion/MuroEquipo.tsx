@@ -11,12 +11,14 @@ interface Props {
   yo: string;
   misVotos: Record<string, string[]>;
   votosAbiertos: boolean;
+  /** Quien no es admin no recibe las cualidades: la tarjeta dice que se desvelan el día del almuerzo. */
+  cualidadesOcultas: boolean;
   onBrindis: (miembro: Miembro) => void;
   onSubirFoto: (archivo: File) => Promise<void>;
 }
 
 /** Una tarjeta por persona activa; la mía primero (decisión D7). */
-export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrindis, onSubirFoto }: Props) {
+export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, cualidadesOcultas, onBrindis, onSubirFoto }: Props) {
   const [subiendo, setSubiendo] = useState(false);
   const ordenados = [...equipo.filter((m) => m.userId === yo), ...equipo.filter((m) => m.userId !== yo)];
 
@@ -57,7 +59,9 @@ export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrin
               <p className="mb-2.5 font-extrabold leading-snug text-[#1F2229]" style={{ fontFamily: FUENTE_TITULOS }}>
                 {m.nombre}
               </p>
-              {m.cualidades.length > 0 ? (
+              {cualidadesOcultas ? (
+                <p className="mb-4 text-sm font-semibold text-[#5C6170]">🤫 Se desvelan el día del almuerzo</p>
+              ) : m.cualidades.length > 0 ? (
                 <ul className="mb-4 flex flex-wrap justify-center gap-1.5">
                   {m.cualidades.map((c) => (
                     <li key={c.cualidad} className="rounded-full bg-[#F4F6FA] px-2.5 py-1 text-xs font-bold text-[#3E4352]">

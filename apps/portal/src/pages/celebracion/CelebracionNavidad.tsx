@@ -252,6 +252,7 @@ export default function CelebracionNavidad() {
               yo={vista.yo}
               misVotos={vista.misVotos}
               votosAbiertos={evento.votosAbiertos}
+              cualidadesOcultas={vista.cualidadesOcultas}
               onBrindis={setBrindisPara}
               onSubirFoto={subirFoto}
             />
