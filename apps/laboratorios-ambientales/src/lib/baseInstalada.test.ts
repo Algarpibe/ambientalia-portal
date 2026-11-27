@@ -1,15 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import type { Laboratorio } from '../types';
 import { mapRecord } from '../services/api';
-import type { EquipoInstalado } from './baseInstalada';
+import type { CruceZoho } from './clientes';
+import type { EquipoInstalado, FiltrosEquipos } from './baseInstalada';
 import {
+  FILTROS_VACIOS,
+  SIN_IDENTIFICAR,
   agruparEquipos,
   codigosEpa,
   esRegistroDeEquipoAire,
   esValorVacio,
+  filtrarEquipos,
+  marcasDe,
   normalizarCodigosEpa,
+  opcionesDeFiltro,
   ordenarEquipos,
   separarSeries,
+  textoRecuento,
 } from './baseInstalada';
 
 describe('esValorVacio', () => {
@@ -366,5 +373,143 @@ describe('ordenarEquipos', () => {
     const lista = [equipo({ serie: 'B' }), equipo({ serie: 'A' })];
     ordenarEquipos(lista);
     expect(series(lista)).toEqual(['B', 'A']);
+  });
+});
+
+const HOY = '2026-11-27';
+
+// Tres equipos ya armados: uno en el Valle con marca Teledyne; dos de un mismo
+// NIT en Antioquia (dos sedes), uno sin marca ni estación. Datos ficticios.
+const LISTA = [
+  equipo({
+    codigo: '1',
+    serie: 'S1',
+    laboratorio: 'LABORATORIO QUÍMICO DEL VALLE',
+    nit: '900.111.222-3',
+    departamento: 'Valle del Cauca',
+    ciudad: 'Cali',
+    estaciones: ['Estación Ficticia Norte'],
+    marcasYModelos: [{ marca: 'Teledyne API', modelo: '100 Series' }],
+  }),
+  equipo({
+    codigo: '2',
+    serie: 'S2',
+    laboratorio: 'Aire de Antioquia',
+    nit: '800.333.444-5',
+    departamento: 'Antioquia',
+    ciudad: 'Medellín',
+    estaciones: [],
+    marcasYModelos: [],
+  }),
+  equipo({
+    codigo: '3',
+    serie: 'AB-778',
+    laboratorio: 'Aire de Antioquia',
+    nit: '800.333.444-5',
+    departamento: 'Antioquia',
+    ciudad: 'Rionegro',
+    estaciones: ['Estación Ficticia Sur'],
+  }),
+];
+
+const filtrar = (cambios: Partial<FiltrosEquipos>, cruce: CruceZoho | null = null): string[] =>
+  series(filtrarEquipos(LISTA, { ...FILTROS_VACIOS, ...cambios }, cruce, HOY));
+
+describe('filtrarEquipos', () => {
+  it('sin filtros, todos, en el orden recibido', () => {
+    expect(filtrar({})).toEqual(['S1', 'S2', 'AB-778']);
+  });
+
+  it('busca por nombre sin distinguir mayúsculas ni tildes', () => {
+    expect(filtrar({ busqueda: 'quimico' })).toEqual(['S1']);
+    expect(filtrar({ busqueda: '  AIRE de ANTIOQUÍA ' })).toEqual(['S2', 'AB-778']);
+  });
+
+  it('busca por NIT, con o sin puntos ni guion', () => {
+    expect(filtrar({ busqueda: '900.111' })).toEqual(['S1']);
+    expect(filtrar({ busqueda: '800333444' })).toEqual(['S2', 'AB-778']);
+  });
+
+  it('busca por estación', () => {
+    expect(filtrar({ busqueda: 'ficticia sur' })).toEqual(['AB-778']);
+  });
+
+  it('busca por serie', () => {
+    expect(filtrar({ busqueda: 'ab-778' })).toEqual(['AB-778']);
+  });
+
+  it('departamento y ciudad', () => {
+    expect(filtrar({ departamento: 'Antioquia' })).toEqual(['S2', 'AB-778']);
+    expect(filtrar({ departamento: 'Antioquia', ciudad: 'Rionegro' })).toEqual(['AB-778']);
+  });
+
+  it('marca: pasa si alguno de sus pares la tiene, también dentro de una marca con varios fabricantes', () => {
+    expect(filtrar({ marca: 'Teledyne API' })).toEqual(['S1']);
+    expect(filtrar({ marca: 'New Star Environmental' })).toEqual(['AB-778']);
+  });
+
+  it('marca «Sin identificar»: los que no tienen ningún par', () => {
+    expect(filtrar({ marca: SIN_IDENTIFICAR })).toEqual(['S2']);
+  });
+
+  it('cliente: con el cruce filtra por estado; sin cruce no filtra', () => {
+    const cruce: CruceZoho = new Map([
+      ['900111222', { ultimaFactura: '2026-10-01', ocmaVendido: null, ultimosRepuestos: null }],
+    ]);
+    expect(filtrar({ cliente: 'activo' }, cruce)).toEqual(['S1']);
+    expect(filtrar({ cliente: 'no-en-zoho' }, cruce)).toEqual(['S2', 'AB-778']);
+    expect(filtrar({ cliente: 'activo' }, null)).toEqual(['S1', 'S2', 'AB-778']);
+  });
+
+  it('los filtros se suman', () => {
+    expect(filtrar({ departamento: 'Antioquia', marca: SIN_IDENTIFICAR, busqueda: 'aire' })).toEqual(['S2']);
+    expect(filtrar({ departamento: 'Valle del Cauca', busqueda: 'aire' })).toEqual([]);
+  });
+});
+
+describe('marcasDe', () => {
+  it('parte una marca con varios fabricantes; una sola queda igual', () => {
+    expect(marcasDe('Tisch Environmental / New Star Environmental')).toEqual([
+      'Tisch Environmental',
+      'New Star Environmental',
+    ]);
+    expect(marcasDe('Met One Instruments, Inc.')).toEqual(['Met One Instruments, Inc.']);
+  });
+});
+
+describe('opcionesDeFiltro', () => {
+  it('los departamentos de todos los equipos, distintos y ordenados', () => {
+    expect(opcionesDeFiltro(LISTA, '').departamentos).toEqual(['Antioquia', 'Valle del Cauca']);
+  });
+
+  it('sin departamento, todas las ciudades; con uno, solo las suyas', () => {
+    expect(opcionesDeFiltro(LISTA, '').ciudades).toEqual(['Cali', 'Medellín', 'Rionegro']);
+    expect(opcionesDeFiltro(LISTA, 'Antioquia').ciudades).toEqual(['Medellín', 'Rionegro']);
+  });
+
+  it('las marcas presentes, partidas y ordenadas, con «Sin identificar» al final', () => {
+    expect(opcionesDeFiltro(LISTA, '').marcas).toEqual([
+      'New Star Environmental',
+      'Teledyne API',
+      'Tisch Environmental',
+      'Sin identificar',
+    ]);
+  });
+
+  it('si todos los equipos tienen marca, no ofrece «Sin identificar»', () => {
+    expect(opcionesDeFiltro([LISTA[0]], '').marcas).toEqual(['Teledyne API']);
+  });
+});
+
+describe('textoRecuento', () => {
+  it('singular y plural', () => {
+    expect(textoRecuento([])).toBe('0 equipos de 0 laboratorios');
+    expect(textoRecuento([equipo()])).toBe('1 equipo de 1 laboratorio');
+  });
+
+  it('cuenta los laboratorios por código, no los equipos', () => {
+    expect(textoRecuento([equipo({ serie: 'A' }), equipo({ serie: 'B' }), equipo({ codigo: '202', serie: 'C' })])).toBe(
+      '3 equipos de 2 laboratorios',
+    );
   });
 });

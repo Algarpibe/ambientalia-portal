@@ -2,9 +2,11 @@
 // sacado del dataset 2waz-acaa. Ver
 // docs/superpowers/specs/2026-11-27-base-instalada-aire-design.md.
 import type { Laboratorio } from '../types';
+import type { CruceZoho, EstadoCliente } from './clientes';
+import { filtrarPorCliente } from './clientes';
 import { extractEquipment } from './equipment';
 import { fechaDeHasta } from './fechas';
-import { distintos } from './prospects';
+import { clave, distintos, nitCoincide } from './prospects';
 
 // Los rellenos que el dataset escribe cuando no hay dato.
 const RELLENOS = new Set(['no aplica', 'n/a', 'na']);
@@ -200,4 +202,91 @@ export function ordenarEquipos(equipos: EquipoInstalado[]): EquipoInstalado[] {
       compararEstacion(a, b) ||
       compararTexto(a.serie, b.serie),
   );
+}
+
+export type FiltrosEquipos = {
+  busqueda: string;
+  // '' = todos los departamentos.
+  departamento: string;
+  // '' = todas las ciudades.
+  ciudad: string;
+  // '' = todas; SIN_IDENTIFICAR = los que no tienen marca.
+  marca: string;
+  // '' = todos.
+  cliente: EstadoCliente | '';
+};
+
+export const FILTROS_VACIOS: FiltrosEquipos = { busqueda: '', departamento: '', ciudad: '', marca: '', cliente: '' };
+
+export type OpcionesDeFiltro = { departamentos: string[]; ciudades: string[]; marcas: string[] };
+
+// Las marcas de un texto de marca: un código con varios fabricantes los trae
+// unidos con « / » («Tisch Environmental / New Star Environmental»).
+export function marcasDe(marca: string): string[] {
+  return marca
+    .split(' / ')
+    .map((parte) => parte.trim())
+    .filter(Boolean);
+}
+
+function tieneMarca(equipo: EquipoInstalado, marca: string): boolean {
+  if (marca === SIN_IDENTIFICAR) return equipo.marcasYModelos.length === 0;
+  return equipo.marcasYModelos.some((par) => marcasDe(par.marca).includes(marca));
+}
+
+// `busqueda` ya pasó por clave: la misma normalización que en Prospectos.
+function coincideBusqueda(equipo: EquipoInstalado, busqueda: string): boolean {
+  return (
+    clave(equipo.laboratorio).includes(busqueda) ||
+    nitCoincide(equipo.nit, busqueda) ||
+    equipo.estaciones.some((estacion) => clave(estacion).includes(busqueda)) ||
+    clave(equipo.serie).includes(busqueda)
+  );
+}
+
+/**
+ * Los filtros se suman y se conserva el orden recibido. Sin cruce (consultando
+ * o con error), el de cliente no cuenta. `hoy` va en AAAA-MM-DD: lo necesita
+ * estadoCliente para saber si un cliente es activo.
+ */
+export function filtrarEquipos(
+  equipos: EquipoInstalado[],
+  filtros: FiltrosEquipos,
+  cruce: CruceZoho | null,
+  hoy: string,
+): EquipoInstalado[] {
+  const busqueda = clave(filtros.busqueda);
+  const filtrados = equipos.filter((equipo) => {
+    if (filtros.departamento && equipo.departamento !== filtros.departamento) return false;
+    if (filtros.ciudad && equipo.ciudad !== filtros.ciudad) return false;
+    if (filtros.marca && !tieneMarca(equipo, filtros.marca)) return false;
+    return busqueda === '' || coincideBusqueda(equipo, busqueda);
+  });
+  return filtrarPorCliente(filtrados, filtros.cliente, cruce, hoy);
+}
+
+/**
+ * Las opciones de los desplegables, de todos los equipos y no de los filtrados:
+ * así lo elegido no desaparece de su lista. Las ciudades, solo las del
+ * departamento elegido. Las marcas, cada fabricante por separado (marcasDe), y
+ * «Sin identificar» al final si hay algún equipo así.
+ */
+export function opcionesDeFiltro(equipos: EquipoInstalado[], departamento: string): OpcionesDeFiltro {
+  const delDepartamento = departamento ? equipos.filter((equipo) => equipo.departamento === departamento) : equipos;
+  const marcas = distintos(equipos.flatMap((equipo) => equipo.marcasYModelos.flatMap((par) => marcasDe(par.marca))));
+  const haySinIdentificar = equipos.some((equipo) => equipo.marcasYModelos.length === 0);
+  return {
+    departamentos: distintos(equipos.map((equipo) => equipo.departamento)),
+    ciudades: distintos(delDepartamento.map((equipo) => equipo.ciudad)),
+    marcas: haySinIdentificar ? [...marcas, SIN_IDENTIFICAR] : marcas,
+  };
+}
+
+/** «N equipos de M laboratorios», con los laboratorios contados por código. */
+export function textoRecuento(equipos: EquipoInstalado[]): string {
+  const laboratorios = new Set(equipos.map((equipo) => idLaboratorio(equipo.codigo, equipo.laboratorio))).size;
+  const cifra = (n: number): string => n.toLocaleString('es-CO');
+  const equiposTexto = `${cifra(equipos.length)} ${equipos.length === 1 ? 'equipo' : 'equipos'}`;
+  const laboratoriosTexto = `${cifra(laboratorios)} ${laboratorios === 1 ? 'laboratorio' : 'laboratorios'}`;
+  return `${equiposTexto} de ${laboratoriosTexto}`;
 }
