@@ -2,7 +2,8 @@
 
 Buscador y análisis de los laboratorios ambientales acreditados por el IDEAM,
 sobre el dataset abierto [`2waz-acaa`](https://www.datos.gov.co/resource/2waz-acaa.json)
-de datos.gov.co (~19.000 acreditaciones).
+de datos.gov.co (~19.000 acreditaciones). La vista de prospectos cruza además
+cada laboratorio con Zoho Books por NIT, a través de hub-api.
 
 ## Cómo se ejecuta
 
@@ -36,13 +37,16 @@ porque el bundle lo produce el portal.
 | `src/lib/brands.ts` | Agrupación laboratorio→equipos del Análisis de Marcas. |
 | `src/lib/prospects.ts` | Prospectos de grasas y aceites: qué acreditación cuenta, infrarrojo o gravimetría, agrupación por laboratorio, vigencia, orden y filtros. |
 | `src/lib/exportProspects.ts` | Filas y nombre de fichero del Excel de prospectos. |
+| `src/lib/clientes.ts` | Cruce con Zoho: NIT base, estado de cliente (36 meses), filtro y estado de la consulta (`estadoDelCruce`). |
+| `src/services/clientesZoho.ts` | Consulta del cruce a hub-api (`POST /api/laboratorios/clientes`), con el JWT del portal y tope de tiempo. |
 | `src/lib/fechas.ts` | Fecha local de hoy y suma de meses de calendario. |
 | `src/lib/view.ts` | La vista abierta, en el hash de la URL (`#buscador`, `#marcas`, `#prospectos`). |
 | `src/pages/` | Vistas: `Buscador`, `Dashboard` (Análisis de Marcas) y `Prospectos`. |
+| `src/components/` | Piezas de vista: `CeldaCliente`, la celda de la columna «Cliente». |
 | `src/App.tsx` | Shell: carga, errores y navegación. |
 
 La lógica pura vive en `src/lib/` con tests unitarios; los componentes de
-`src/pages/` solo la orquestan.
+`src/pages/` y `src/components/` solo la orquestan y la pintan.
 
 ## Carga y cache
 
@@ -139,8 +143,8 @@ pestañas:
 
 - **El dataset no identifica el equipo.** En grasas y aceites,
   `identificaci_n_de_equipo` vale siempre «No Aplica» y ningún método nombra
-  OCMA ni Horiba: la vista no sabe quién tiene un OCMA. Eso lo dirían Zoho o
-  Desk 2.0, que quedan fuera.
+  OCMA ni Horiba: el dataset no sabe quién tiene un OCMA. Lo que dice Zoho va
+  en la columna «Cliente» (ver abajo); Desk 2.0 queda fuera.
 - **Vigencia más próxima:** la fecha `hasta` más temprana de sus acreditaciones
   de grasas y aceites («---» no cuenta). «Vence en menos de 6 meses» va de hoy a
   hoy + 6 meses de calendario, con el límite fuera; si ese día no existe, el
@@ -158,10 +162,57 @@ pestañas:
 - **En el Buscador,** «Aceites y Grasas» y «Grasas y Aceites» son una sola
   casilla: `variableKey` lleva un sinónimo explícito, solo para ese par.
 
+### Cruce con Zoho (columna «Cliente»)
+
+Al abrir la vista, la app envía a hub-api (`POST /api/laboratorios/clientes`,
+con el JWT del portal y `requireApp('laboratorios-ambientales')`) los NIT base
+de los 90 laboratorios. Responde, de los que están en Zoho, tres fechas y nada
+más: ni importes, ni nombres, ni identificadores.
+
+| Estado | Cuándo |
+|---|---|
+| Cliente activo | Última factura (sin borradores ni anuladas) en los últimos 36 meses, límite incluido. |
+| Cliente antiguo | Última factura más antigua. |
+| En Zoho sin compras | Hay un contacto de tipo cliente con ese NIT, sin facturas. |
+| No está en Zoho | Ningún contacto de tipo cliente tiene ese NIT. |
+| Sin NIT | El dataset no trae NIT, o no da de 6 a 10 dígitos. |
+
+- **NIT base:** lo de antes del primer «-», solo dígitos (`900.000.001-7` →
+  `900000001`). Es el formato de `cf_nit` en Zoho. Varios contactos con el
+  mismo NIT se suman. La regla está dos veces, en
+  `src/lib/clientes.ts` y en `apps/hub-api/src/laboratorios/clientes.ts`, con
+  las mismas pruebas: si se separan, hub-api rechaza la petición entera.
+- **OCMA vendido** y **Repuestos OCMA:** la factura más reciente con un artículo
+  de la categoría «OCMA-500 Series» o «C&R OCMA-500». Solo cuentan los que
+  facturó Ambientalia. La categoría «Opcional OCMA-500» (un artículo) no
+  cuenta como repuesto.
+- **Si hub-api falla,** la vista funciona igual: aviso con «Reintentar», la
+  columna vacía, el filtro «Cliente» desactivado y el Excel sin el cruce. Un
+  resultado viejo nunca se enseña como actual: si los NIT cambian tras un
+  refresco o se reintenta, la columna vuelve a «Consultando…»
+  (`estadoDelCruce`).
+- **El Excel** lleva cuatro columnas más al final: Cliente, Última factura,
+  OCMA vendido y Últimos repuestos OCMA.
+- hub-api cachea el cruce completo 2 minutos y solo devuelve los NIT pedidos.
+  El servidor no sabe cuáles son prospectos, así que frena el barrido por
+  volumen: como mucho 150 NIT por petición y 5 peticiones por minuto y usuario
+  (después, 429). Hoy la vista envía unos 85.
+- **Calidad del dato (2026-11-27):** los 85 NIT del dataset traen guion; en
+  Zoho, de 609 contactos con NIT, uno de un laboratorio de la lista lleva el
+  dígito de verificación pegado (10 dígitos) y no cruza hasta que se corrija
+  en Zoho.
+
 ## Mejoras pendientes
 
-- Cruzar los prospectos con Zoho por NIT (cliente o no, si se le vendió un
-  OCMA). La tabla admite una columna «Cliente» más sin rehacerse.
+- Cruce con Zoho:
+  - Cada vez que se abre `#prospectos` se hace una consulta: ir y volver entre
+    el Buscador y Prospectos seis veces en un minuto da 429. Sale el aviso
+    genérico y «Reintentar» falla hasta que pasa el minuto. Mejoras posibles:
+    decir «espera un minuto», o guardar el último cruce en memoria unos
+    minutos.
+  - «Reintentar» desaparece al pulsarlo y el foco de teclado se pierde.
+  - Si el dataset pasara de 150 laboratorios de grasas y aceites, hub-api
+    rechazaría la petición (400): habría que partirla.
 - El cache completo (~3 MB) va a `localStorage`, que comparte los ~5 MB del
   origen con el resto del portal. Si empieza a fallar por cuota, migrar a
   IndexedDB. Hoy degrada limpio: si no cabe, se sigue con los datos en memoria.

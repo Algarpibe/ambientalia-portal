@@ -36,6 +36,16 @@ supresión** en esta capa técnica.
     `/api/invoices|sales-orders/:numero/detail`), junto al encabezado del documento.
 - **Dirección** del cliente (`billing_address` → `address`, `city`), en el modal de
   *detalle* de factura/OV de **Contabilidad** y **Conciliador de Pagos**.
+- **Si un NIT es cliente**, en **Laboratorios ambientales**
+  (`POST /api/laboratorios/clientes`). La app envía NIT que ya son públicos (el
+  dataset del IDEAM en datos.gov.co) y recibe, de los que están en Zoho, solo
+  tres fechas: la de la última factura, la del último OCMA vendido y la de los
+  últimos repuestos de OCMA. No salen nombres, importes ni identificadores. El
+  cruce completo (NIT → fechas) se guarda en memoria 2 minutos (`cached`), pero
+  la respuesta lleva solo los NIT pedidos. El servidor no comprueba que sean
+  del dataset: un usuario con la app podría probar NIT a ciegas. Se frena por
+  volumen (150 NIT por petición, 5 peticiones por minuto y usuario: unos 750
+  NIT por minuto como mucho), no se impide.
 
 **Finalidad y base legal:** contable y de conciliación de cartera (identificar
 inequívocamente al tercero de un documento y su domicilio fiscal); base legal en la
@@ -43,20 +53,32 @@ ejecución de la relación comercial y el cumplimiento de obligaciones contables
 tributarias. Para clientes persona natural, NIT y dirección constituyen dato
 personal (Ley 1581 de 2012).
 
+En **Laboratorios ambientales** la finalidad es otra: **prospección comercial**,
+saber si un laboratorio acreditado ante el IDEAM ya es cliente, desde cuándo no
+compra y si tiene un OCMA. Base legal: el interés legítimo de Ambientalia en
+atender a sus clientes y prospectos, con datos que salen de los registros
+propios (facturas) y de un dataset público. Si el laboratorio es persona
+natural, «es cliente y compró en tal fecha» es dato personal: por eso solo
+salen fechas y estados, y solo a quien tiene la app.
+
 **No** se expone email, teléfono ni cédula por ninguna query del hub, salvo los correos de los contactos de clientes de Trazabilidad Mantenimientos (§2.2).
 
 Medidas asociadas:
 
 - **Acceso restringido por app en el servidor** (`requireApp`, no solo en el
   frontend): `/api/wo-sales/*` → `requireApp('WO-sales')`; `/api/contabilidad/*` →
-  `requireApp('contabilidad')`; y los endpoints de datos/detalle de las demás apps
+  `requireApp('contabilidad')`; `/api/laboratorios/clientes` →
+  `requireApp('laboratorios-ambientales')`; y los endpoints de datos/detalle de las demás apps
   (`payment-reconciliation`, `inventory-optimization`,
   `customer-valuation`) exigen su `requireApp` correspondiente. Así, solo los
   usuarios con la app asignada acceden al NIT/dirección; un usuario sin la app
   recibe 403 (cierre de **SEC-210 / SEC-211 / PRIV-810**).
 - **No se almacena ni se cachea el detalle**: NIT y dirección se leen bajo demanda
   de `books.contacts` / `books.*.raw` para el documento consultado; el archivo de
-  WO-sales se genera bajo demanda y se descarga.
+  WO-sales se genera bajo demanda y se descarga. **Excepción:** el cruce de
+  Laboratorios ambientales guarda en memoria, 2 minutos, el mapa NIT → tres
+  fechas de todos los contactos cliente (ver arriba); no se escribe en disco ni
+  en la base.
 
 Los `query params` de estos endpoints son números de documento, fechas y un nombre
 de cliente opcional.
