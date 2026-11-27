@@ -4,6 +4,7 @@ import {
   CelebracionError,
   confirmacionesAbiertas,
   esUuid,
+  ordenarCualidades,
   parseConfirmacion,
   parseCualidades,
   parseFoto,
@@ -172,5 +173,37 @@ describe('top3', () => {
 
   it('ignora las cualidades que ya no están en la lista', () => {
     expect(top3([{ cualidad: 'Puntualidad', votos: 9 }])).toEqual([]);
+  });
+});
+
+describe('ordenarCualidades', () => {
+  const conteos = [
+    { cualidad: 'Creatividad', votos: 1 },
+    { cualidad: 'Compromiso', votos: 2 },
+    { cualidad: 'Puntualidad', votos: 9 },
+    { cualidad: 'Empatía', votos: 2 },
+    { cualidad: 'Generosidad', votos: 0 },
+    { cualidad: 'Liderazgo', votos: 5 },
+    { cualidad: 'Espíritu positivo', votos: 1 },
+  ];
+
+  it('devuelve todas, por votos y con el desempate de la lista, sin las de 0 votos ni las que ya no están', () => {
+    expect(ordenarCualidades(conteos)).toEqual([
+      { cualidad: 'Liderazgo', votos: 5 },
+      { cualidad: 'Empatía', votos: 2 },
+      { cualidad: 'Compromiso', votos: 2 },
+      { cualidad: 'Creatividad', votos: 1 },
+      { cualidad: 'Espíritu positivo', votos: 1 },
+    ]);
+  });
+
+  it('sus 3 primeras son el top 3', () => {
+    expect(top3(conteos)).toEqual(ordenarCualidades(conteos).slice(0, 3));
+  });
+
+  it('no cambia la lista que recibe', () => {
+    const copia = conteos.map((c) => ({ ...c }));
+    ordenarCualidades(conteos);
+    expect(conteos).toEqual(copia);
   });
 });
