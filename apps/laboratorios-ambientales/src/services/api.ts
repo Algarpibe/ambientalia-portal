@@ -75,7 +75,7 @@ export function mapRecord(record: Record<string, string | undefined>): Laborator
 }
 
 // Se llama antes de leer el cache, y también cuando el cache nuevo está fresco:
-// si solo se purgara al descargar, quien ya tenga cache v2 arrastraría los ~3 MB
+// si solo se purgara al descargar, quien ya tenga el cache vigente arrastraría los ~3 MB
 // de la v1 para siempre.
 function purgeLegacyCache(): void {
   try {

@@ -48,5 +48,6 @@ describe('separarSeries', () => {
     expect(separarSeries('SN-0001,, ;\n')).toEqual(['SN-0001']);
     expect(separarSeries('SN-0001, ---, No aplica')).toEqual(['SN-0001']);
     expect(separarSeries('')).toEqual([]);
+    expect(separarSeries('---, No aplica')).toEqual([]);
   });
 });

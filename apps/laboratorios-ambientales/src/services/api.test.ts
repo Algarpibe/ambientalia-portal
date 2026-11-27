@@ -99,6 +99,23 @@ describe('mapRecord', () => {
     }
     expect('serie' in mapRecord(RAW)).toBe(false);
   });
+
+  it('estacion y serie se tratan por separado: con estación y serie vacía, solo hay estacion', () => {
+    const lab = mapRecord({
+      ...RAW,
+      nombre_de_la_estaci_n: 'Estación Ficticia Norte',
+      identificaci_n_de_equipo: 'No aplica',
+    });
+    expect(lab.estacion).toBe('Estación Ficticia Norte');
+    expect('serie' in lab).toBe(false);
+  });
+
+  // El registro conserva el texto tal cual; separarSeries es quien lo reduce a
+  // ninguna serie (ver baseInstalada.test.ts).
+  it('un campo de equipo con solo rellenos separados por coma se guarda como serie', () => {
+    const lab = mapRecord({ ...RAW, identificaci_n_de_equipo: '---, No aplica' });
+    expect(lab.serie).toBe('---, No aplica');
+  });
 });
 
 describe('fetchLaboratorios', () => {
