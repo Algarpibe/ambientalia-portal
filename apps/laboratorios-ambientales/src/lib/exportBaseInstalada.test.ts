@@ -78,6 +78,22 @@ describe('filasExcel', () => {
     ]);
   });
 
+  it('con dos pares de la misma marca y distinto modelo, la marca se repite para que la n.º i siga siendo la del modelo n.º i', () => {
+    const fila = filasExcel(
+      [
+        equipo({
+          marcasYModelos: [
+            { marca: 'Thermo Scientific', modelo: '43i' },
+            { marca: 'Thermo Scientific', modelo: '49i' },
+          ],
+        }),
+      ],
+      HOY,
+    )[1];
+    expect(fila[6]).toBe('Thermo Scientific; Thermo Scientific');
+    expect(fila[7]).toBe('43i; 49i');
+  });
+
   it('sin estación ni marca: «Sin estación», «Sin identificar» y el modelo vacío', () => {
     const fila = filasExcel([equipo({ estaciones: [], marcasYModelos: [], codigosEpa: ['RFNA-1289-070'] })], HOY)[1];
     expect(fila[5]).toBe('Sin estación');
