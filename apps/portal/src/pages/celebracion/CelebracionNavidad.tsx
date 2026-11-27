@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import logo from '../../assets/ambientalia-logo.png';
 import { notifyProfileUpdated } from '../../hooks/useProfile';
 import { fileToResizedDataUrl } from '../../lib/image';
 import { notify } from '../../lib/notify';
 import { cargarVista, ErrorApi, guardarConfirmacion, guardarVotos, mensajeDeError, subirMiFoto } from './api';
-import { lanzarConfeti } from './confeti';
+import { lanzarConfeti, prefiereMenosMovimiento } from './confeti';
 import Confirmacion from './Confirmacion';
 import CuentaAtras from './CuentaAtras';
 import { BOTON } from './estilos';
@@ -43,6 +43,11 @@ function Centro({ children }: { children: ReactNode }) {
   return <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#FAFAFC] p-6 text-center">{children}</div>;
 }
 
+/** Lleva la vista hasta esa sección (jsdom no trae scrollIntoView). Respeta el movimiento reducido. */
+function irA(ref: RefObject<HTMLElement | null>) {
+  ref.current?.scrollIntoView?.({ behavior: prefiereMenosMovimiento() ? 'auto' : 'smooth', block: 'start' });
+}
+
 /** `/celebracion-navidad-2026`: la invitación al almuerzo de fin de año. Fuera del shell; con sesión. */
 export default function CelebracionNavidad() {
   const [vista, setVista] = useState<Vista | null>(null);
@@ -52,6 +57,8 @@ export default function CelebracionNavidad() {
   const [brindisPara, setBrindisPara] = useState<Miembro | null>(null);
   const [version, setVersion] = useState(0);
   const tituloRef = useRef<HTMLHeadingElement>(null);
+  const muroRef = useRef<HTMLElement>(null);
+  const confirmacionRef = useRef<HTMLElement>(null);
 
   const recargar = useCallback(async () => {
     try {
@@ -72,6 +79,18 @@ export default function CelebracionNavidad() {
   useEffect(() => {
     if (abierta) tituloRef.current?.focus();
   }, [abierta]);
+
+  // Al completar el último brindis que faltaba, baja sola a la confirmación (nunca en la primera carga).
+  const dados = vista?.brindis.dados;
+  const minimo = vista?.brindis.minimo;
+  const abiertas = vista?.evento.confirmacionesAbiertas;
+  const dadosAntes = useRef<number | null>(null);
+  useEffect(() => {
+    if (dados === undefined || minimo === undefined) return;
+    const antes = dadosAntes.current;
+    dadosAntes.current = dados;
+    if (antes !== null && antes < minimo && dados >= minimo && abiertas) irA(confirmacionRef);
+  }, [dados, minimo, abiertas]);
 
   useEffect(() => {
     const anterior = document.title;
@@ -164,6 +183,7 @@ export default function CelebracionNavidad() {
   };
 
   const { evento } = vista;
+  const bloqueada = evento.confirmacionesAbiertas && vista.brindis.dados < vista.brindis.minimo;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#FAFAFC] text-[#2B2D35]" style={{ fontFamily: FUENTE_TEXTO }}>
@@ -210,7 +230,7 @@ export default function CelebracionNavidad() {
 
         <TarjetasEvento evento={evento} />
 
-        <section aria-labelledby="titulo-equipo" className="mb-6">
+        <section ref={muroRef} aria-labelledby="titulo-equipo" className="mb-6 scroll-mt-4">
           <Tarjeta>
             <div className="mx-auto mb-6 max-w-2xl text-center">
               <Etiqueta tono="pink">🌟 El corazón de Ambientalia</Etiqueta>
@@ -219,6 +239,11 @@ export default function CelebracionNavidad() {
                 Brinda por tus compañeros eligiendo hasta {evento.maxCualidades} cualidades: tu voto es anónimo. Sube tu foto
                 desde tu tarjeta.
               </p>
+              {bloqueada && (
+                <p className="mt-2 text-sm font-semibold text-[#C95B00]">
+                  Llevas {vista.brindis.dados} de {vista.brindis.minimo} brindis para poder confirmar.
+                </p>
+              )}
             </div>
             <MuroEquipo
               equipo={vista.equipo}
@@ -231,7 +256,7 @@ export default function CelebracionNavidad() {
           </Tarjeta>
         </section>
 
-        <section aria-labelledby="titulo-confirmacion" className="mb-6">
+        <section ref={confirmacionRef} aria-labelledby="titulo-confirmacion" className="mb-6 scroll-mt-4">
           <Tarjeta>
             <Etiqueta tono="teal">🎟️ Confirmación y pase digital</Etiqueta>
             <Titulo id="titulo-confirmacion">¿Nos acompañas?</Titulo>
@@ -240,14 +265,33 @@ export default function CelebracionNavidad() {
                 Confirma hasta el {diaYMes(evento.cierreConfirmaciones)}. Puedes cambiar tu respuesta hasta esa fecha.
               </p>
             )}
-            <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />
-            {vista.miRespuesta?.asiste && (
-              <PaseDigital
-                nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
-                evento={evento}
-                respuesta={vista.miRespuesta}
-              />
+            {bloqueada && (
+              <div
+                role="status"
+                className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#FDB913] bg-[#FFF6E5] px-4 py-3 text-sm font-semibold text-[#8A4B00]"
+              >
+                <span>
+                  🔒 Brinda por todos tus compañeros para confirmar · {vista.brindis.dados} de {vista.brindis.minimo}
+                </span>
+                <button type="button" className={BOTON} onClick={() => irA(muroRef)}>
+                  Ir al muro
+                </button>
+              </div>
             )}
+            <div
+              inert={bloqueada}
+              aria-hidden={bloqueada || undefined}
+              className={bloqueada ? 'pointer-events-none select-none opacity-40' : undefined}
+            >
+              <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />
+              {vista.miRespuesta?.asiste && (
+                <PaseDigital
+                  nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
+                  evento={evento}
+                  respuesta={vista.miRespuesta}
+                />
+              )}
+            </div>
           </Tarjeta>
         </section>
 

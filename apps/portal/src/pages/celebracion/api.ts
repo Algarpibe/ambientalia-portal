@@ -68,6 +68,7 @@ export async function subirMiFoto(dataUrl: string): Promise<void> {
 const MENSAJES: Record<string, string> = {
   confirmaciones_cerradas: 'Las confirmaciones ya están cerradas.',
   votos_cerrados: 'La votación ya se cerró.',
+  faltan_brindis: 'Primero brinda por tus compañeros en el muro.',
   asiste_invalido: 'Indica si vas o no.',
   preferencia_invalida: 'Elige una preferencia de menú.',
   mensaje_invalido: 'El mensaje no puede pasar de 200 caracteres ni llevar saltos de línea.',

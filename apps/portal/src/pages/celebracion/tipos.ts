@@ -52,6 +52,8 @@ export interface Vista {
   equipo: Miembro[];
   miRespuesta: Respuesta | null;
   misVotos: Record<string, string[]>;
+  /** Brindis por compañeros invitados distintos que llevo y los que hacen falta (todos) para responder. */
+  brindis: { dados: number; minimo: number };
 }
 
 export interface MiEstado {

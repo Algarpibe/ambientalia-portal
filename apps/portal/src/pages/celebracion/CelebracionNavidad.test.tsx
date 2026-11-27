@@ -14,7 +14,7 @@ vi.mock('./api', async (importOriginal) => ({
   subirMiFoto: vi.fn(),
   cargarResumen: vi.fn(),
 }));
-vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn() }));
+vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 
 beforeEach(() => {
@@ -103,5 +103,30 @@ describe('CelebracionNavidad', () => {
     fireEvent.click(screen.getByRole('button', { name: /Confirmar respuesta/ }));
     await waitFor(() => expect(notify).toHaveBeenCalledWith('Las confirmaciones ya están cerradas.', 'error'));
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
+  });
+
+  it('con brindis pendientes, la confirmación se apaga, dice cuántos llevo y «Ir al muro» sube al muro', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      vi.mocked(cargarVista).mockResolvedValue(vistaDePrueba({ brindis: { dados: 1, minimo: 12 } }));
+      await abrir();
+      expect(screen.getByRole('status').textContent).toContain('Brinda por todos tus compañeros para confirmar · 1 de 12');
+      expect(screen.getByText('Llevas 1 de 12 brindis para poder confirmar.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Ir al muro' }));
+      expect(scroll).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it('con las confirmaciones cerradas no hay candado aunque falten brindis', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(
+      vistaDePrueba({ evento: eventoDePrueba({ confirmacionesAbiertas: false }), brindis: { dados: 0, minimo: 12 } }),
+    );
+    await abrir();
+    expect(screen.queryByRole('button', { name: 'Ir al muro' })).toBeNull();
+    expect(screen.queryByText(/Llevas 0 de 12/)).toBeNull();
   });
 });

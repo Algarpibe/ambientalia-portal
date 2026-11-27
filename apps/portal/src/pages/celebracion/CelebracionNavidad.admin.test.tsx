@@ -13,7 +13,7 @@ vi.mock('./api', async (importOriginal) => ({
   subirMiFoto: vi.fn(),
   cargarResumen: vi.fn(),
 }));
-vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn() }));
+vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 
 afterEach(() => {

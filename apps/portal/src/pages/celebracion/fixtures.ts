@@ -49,6 +49,8 @@ export function vistaDePrueba(cambios: Partial<Vista> = {}): Vista {
     ],
     miRespuesta: null,
     misVotos: {},
+    // El equipo de prueba son 3 personas: ya brindé por las otras 2 y la confirmación está libre.
+    brindis: { dados: 2, minimo: 2 },
     ...cambios,
   };
 }

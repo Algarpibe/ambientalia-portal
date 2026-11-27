@@ -99,6 +99,7 @@ describe('api de la invitación', () => {
   it('mensajeDeError traduce los códigos y usa el genérico para lo demás', () => {
     expect(mensajeDeError(new ErrorApi('voto_propio', 400))).toBe('No puedes brindar por ti mismo.');
     expect(mensajeDeError(new ErrorApi('confirmaciones_cerradas', 409))).toBe('Las confirmaciones ya están cerradas.');
+    expect(mensajeDeError(new ErrorApi('faltan_brindis', 409))).toBe('Primero brinda por tus compañeros en el muro.');
     expect(mensajeDeError(new ErrorApi('raro', 500))).toBe('No se pudo guardar. Vuelve a intentarlo.');
     expect(mensajeDeError(new Error('red'))).toBe('No se pudo guardar. Vuelve a intentarlo.');
   });

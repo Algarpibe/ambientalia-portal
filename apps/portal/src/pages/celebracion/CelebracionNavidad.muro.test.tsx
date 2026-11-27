@@ -14,7 +14,7 @@ vi.mock('./api', async (importOriginal) => ({
   subirMiFoto: vi.fn(),
   cargarResumen: vi.fn(),
 }));
-vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn() }));
+vi.mock('./confeti', () => ({ lanzarConfeti: vi.fn(), prefiereMenosMovimiento: vi.fn(() => false) }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 vi.mock('../../lib/image', () => ({ fileToResizedDataUrl: vi.fn(async () => 'data:image/jpeg;base64,AAAA') }));
 vi.mock('../../hooks/useProfile', () => ({ notifyProfileUpdated: vi.fn() }));
@@ -46,6 +46,27 @@ describe('CelebracionNavidad · muro', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(notify).toHaveBeenCalledWith('🥂 ¡Brindis enviado para Bruno!');
     expect(cargarVista).toHaveBeenCalledTimes(2);
+  });
+
+  it('al dar el último brindis que faltaba, baja sola a la confirmación ya encendida', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      vi.mocked(cargarVista)
+        .mockResolvedValueOnce(vistaDePrueba({ brindis: { dados: 11, minimo: 12 } }))
+        .mockResolvedValue(vistaDePrueba({ brindis: { dados: 12, minimo: 12 } }));
+      await abrir();
+      expect(scroll).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
+      fireEvent.click(within(screen.getByRole('article', { name: 'Bruno Díaz' })).getByRole('button', { name: /Enviar brindis/ }));
+      const dialogo = screen.getByRole('dialog', { name: /Brinda por Bruno/ });
+      fireEvent.click(within(dialogo).getByRole('button', { name: /Compromiso/ }));
+      fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar brindis' }));
+      await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: /Sí voy/ })).toBeTruthy();
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it('si la votación cerró mientras tanto (409), avisa, cierra el modal y recarga', async () => {
