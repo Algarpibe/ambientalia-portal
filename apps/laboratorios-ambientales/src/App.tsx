@@ -7,6 +7,7 @@ import { fetchLaboratorios } from './services/api';
 import Buscador from './pages/Buscador';
 import Dashboard from './pages/Dashboard';
 import Prospectos from './pages/Prospectos';
+import BaseInstalada from './pages/BaseInstalada';
 import type { View } from './lib/view';
 import { hashFor, parseView } from './lib/view';
 
@@ -112,6 +113,14 @@ function App() {
     );
   }
 
+  if (view === 'base-aire' && listos) {
+    return (
+      <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
+        <BaseInstalada data={data} onBack={() => navegar('main')} />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
       <div className="flex items-center justify-center min-h-screen p-6">
@@ -172,6 +181,13 @@ function App() {
                   className="px-8 py-4 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
                 >
                   Prospectos de grasas y aceites
+                </a>
+                <a
+                  href={hashFor('base-aire')}
+                  onClick={(e) => abrirVista(e, 'base-aire')}
+                  className="px-8 py-4 bg-sky-700 hover:bg-sky-800 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
+                >
+                  Base instalada de aire
                 </a>
               </div>
               <p className="mt-6 text-sm text-gray-500">
