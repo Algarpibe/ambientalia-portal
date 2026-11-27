@@ -4,6 +4,8 @@ import { cargarResumen, excluirInvitado, mensajeDeError, readmitirInvitado } fro
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { filasExcel, HOJA_EXCEL, nombreFicheroExcel } from './excel';
 import { fechaHoraCorta } from './fechas';
+import { entrarPantallaCompleta, salirPantallaCompleta } from './pantallaCompleta';
+import PresentacionCualidades from './PresentacionCualidades';
 import type { EstadoRespuesta, Evento, Resumen } from './tipos';
 import { Etiqueta, Tarjeta, Titulo } from './ui';
 
@@ -41,6 +43,23 @@ export default function PanelAdmin({ evento, version, yo, onCambio }: Props) {
   const [fallo, setFallo] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  const [presentando, setPresentando] = useState(false);
+
+  // La pantalla completa se pide en el mismo clic: el navegador solo la concede con un gesto del usuario.
+  const presentar = () => {
+    entrarPantallaCompleta();
+    setPresentando(true);
+  };
+
+  // Si el panel se desmonta con la presentación abierta (cambiar de ruta, pulsar «Atrás» o cerrar sesión): la guarda no hace nada
+  // sin pantalla completa, así que es segura con StrictMode.
+  useEffect(() => () => salirPantallaCompleta(), []);
+
+  // Se sale aquí y no al desmontar la presentación: con StrictMode, en desarrollo, saldría nada más entrar (decisión P3).
+  const cerrarPresentacion = useCallback(() => {
+    salirPantallaCompleta();
+    setPresentando(false);
+  }, []);
 
   const cambiarInvitacion = async (accion: () => Promise<void>, aviso: string) => {
     setOcupado(true);
@@ -193,6 +212,14 @@ export default function PanelAdmin({ evento, version, yo, onCambio }: Props) {
             </button>
           </>
         )}
+
+        {/* Fuera del bloque del resumen: no depende de él (decisión P8). */}
+        <div className="mt-3">
+          <button type="button" onClick={presentar} className={BOTON}>
+            🎤 Presentar cualidades
+          </button>
+        </div>
+        {presentando && <PresentacionCualidades onCerrar={cerrarPresentacion} />}
       </Tarjeta>
     </section>
   );
