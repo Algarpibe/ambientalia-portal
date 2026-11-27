@@ -1,5 +1,5 @@
 import { authFetch } from '../../lib/api';
-import type { DatosConfirmacion, MiEstado, Resumen, Vista } from './tipos';
+import type { CualidadesEquipo, DatosConfirmacion, MiEstado, Resumen, Vista } from './tipos';
 
 /** Error de la API con el código que manda hub-api (`{ error: '<codigo>' }`). */
 export class ErrorApi extends Error {
@@ -35,6 +35,11 @@ export async function cargarMiEstado(): Promise<MiEstado> {
 
 export async function cargarResumen(): Promise<Resumen> {
   return leer<Resumen>(await authFetch(`${BASE}/resumen`));
+}
+
+/** Solo admin: todas las cualidades de cada invitado, para presentarlas el día del almuerzo. */
+export async function cargarCualidades(): Promise<CualidadesEquipo> {
+  return leer<CualidadesEquipo>(await authFetch(`${BASE}/cualidades`));
 }
 
 export async function guardarConfirmacion(datos: DatosConfirmacion): Promise<void> {

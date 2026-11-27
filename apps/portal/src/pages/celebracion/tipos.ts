@@ -56,6 +56,13 @@ export interface Vista {
   misVotos: Record<string, string[]>;
   /** Brindis por compañeros invitados distintos que llevo y los que hacen falta (todos) para responder. */
   brindis: { dados: number; minimo: number };
+  /** true para quien no es admin: hub-api le manda las cualidades vacías; se desvelan el día del almuerzo. */
+  cualidadesOcultas: boolean;
+}
+
+/** GET /api/celebracion/cualidades (solo admin): los invitados con TODAS sus cualidades, de más a menos votadas. */
+export interface CualidadesEquipo {
+  equipo: Miembro[];
 }
 
 export interface MiEstado {
