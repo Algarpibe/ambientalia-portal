@@ -25,6 +25,7 @@ describe('configuración', () => {
     expect(EVENTO.id).toBe('fin-de-ano-2026');
     expect(CUALIDADES).toHaveLength(18);
     expect(new Set(CUALIDADES).size).toBe(18);
+    expect(EVENTO.mapsUrl.startsWith('https://www.google.com/maps/place/Anfitriona')).toBe(true);
   });
 });
 
@@ -41,9 +42,11 @@ describe('cierres', () => {
 });
 
 describe('CelebracionError', () => {
-  it('los cierres son 409 y lo demás 400', () => {
+  it('los cierres son 409, no_invitado es 403 y lo demás 400', () => {
     expect(new CelebracionError('confirmaciones_cerradas').status).toBe(409);
     expect(new CelebracionError('votos_cerrados').status).toBe(409);
+    expect(new CelebracionError('no_invitado').status).toBe(403);
+    expect(new CelebracionError('exclusion_propia').status).toBe(400);
     expect(new CelebracionError('voto_propio').status).toBe(400);
   });
 });

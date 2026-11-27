@@ -7,8 +7,8 @@ const leer = (ruta: string) => readFileSync(fileURLToPath(new URL(ruta, import.m
 const sql = () => leer('../users/migrations/081_celebracion.sql').replace(/--.*$/gm, '');
 
 describe('migración 081 (invitación de fin de año)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 080, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'080_ausencias_registrada_por\.sql',\s*'081_celebracion\.sql'\];/);
+  it('está apuntada en MIGRATIONS, detrás de la 080', () => {
+    expect(leer('../db.ts')).toMatch(/'080_ausencias_registrada_por\.sql',\s*'081_celebracion\.sql'[,\]]/);
   });
 
   it('es idempotente y no toca datos: solo CREATE ... IF NOT EXISTS', () => {
@@ -29,5 +29,23 @@ describe('migración 081 (invitación de fin de año)', () => {
     const texto = sql();
     expect(texto).toMatch(/REVOKE DELETE, TRUNCATE ON portal\.celebracion_confirmaciones FROM portal_app/);
     expect(texto).toMatch(/REVOKE UPDATE, TRUNCATE ON portal\.celebracion_votos FROM portal_app/);
+  });
+});
+
+const sql082 = () => leer('../users/migrations/082_celebracion_excluidos.sql').replace(/--.*$/gm, '');
+
+describe('migración 082 (personas quitadas de la invitación)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 081, y es la última', () => {
+    expect(leer('../db.ts')).toMatch(/'081_celebracion\.sql',\s*'082_celebracion_excluidos\.sql'\];/);
+  });
+
+  it('es idempotente y no toca datos: solo CREATE TABLE IF NOT EXISTS', () => {
+    const texto = sql082();
+    expect(texto).toMatch(/CREATE TABLE IF NOT EXISTS portal\.celebracion_excluidos/);
+    expect(texto).not.toMatch(/\bINSERT\s+INTO\b|\bUPDATE\s+portal\.|\bDELETE\s+FROM\b/i);
+  });
+
+  it('el rol de las peticiones no edita exclusiones (DATA-332)', () => {
+    expect(sql082()).toMatch(/REVOKE UPDATE, TRUNCATE ON portal\.celebracion_excluidos FROM portal_app/);
   });
 });

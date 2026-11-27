@@ -84,11 +84,11 @@ describe('vista', () => {
 describe('miEstado', () => {
   it('dice si he respondido y si las confirmaciones siguen abiertas', async () => {
     const { service, reloj } = montar();
-    expect(await service.miEstado(ANA)).toEqual({ respondido: false, confirmacionesAbiertas: true });
+    expect(await service.miEstado(ANA)).toEqual({ respondido: false, confirmacionesAbiertas: true, invitado: true });
     await service.confirmar(ANA, { asiste: false });
-    expect(await service.miEstado(ANA)).toEqual({ respondido: true, confirmacionesAbiertas: true });
+    expect(await service.miEstado(ANA)).toEqual({ respondido: true, confirmacionesAbiertas: true, invitado: true });
     reloj.ahora = TRAS_EL_CORTE;
-    expect(await service.miEstado(CARLA)).toEqual({ respondido: false, confirmacionesAbiertas: false });
+    expect(await service.miEstado(CARLA)).toEqual({ respondido: false, confirmacionesAbiertas: false, invitado: true });
   });
 });
 
@@ -202,5 +202,118 @@ describe('resumen', () => {
       { userId: BRUNO, nombre: 'Bruno Díaz', estado: 'no_va', preferencia: null, mensaje: null, actualizadoEn: ANTES_DEL_CORTE },
       { userId: CARLA, nombre: 'Carla Gómez', estado: 'sin_responder', preferencia: null, mensaje: null, actualizadoEn: null },
     ]);
+    expect(resumen.excluidos).toEqual([]);
+  });
+});
+
+describe('personas quitadas de la invitación', () => {
+  const ADMIN = ANA;
+
+  async function sinBruno() {
+    const m = montar();
+    await m.service.excluir(ADMIN, BRUNO);
+    return m;
+  }
+
+  it('excluir y readmitir validan el UUID y la persona', async () => {
+    const { store, service } = montar();
+    await expect(service.excluir(ADMIN, 'no-es-uuid')).rejects.toMatchObject({ code: 'usuario_no_valido', status: 400 });
+    await expect(service.excluir(ADMIN, undefined)).rejects.toMatchObject({ code: 'usuario_no_valido' });
+    await expect(service.excluir(ADMIN, ADMIN)).rejects.toMatchObject({ code: 'exclusion_propia', status: 400 });
+    await expect(service.excluir(ADMIN, ADMIN.toUpperCase())).rejects.toMatchObject({ code: 'exclusion_propia' });
+    await expect(service.excluir(ADMIN, DIANA)).rejects.toMatchObject({ code: 'usuario_no_valido' });
+    await expect(service.excluir(ADMIN, '00000000-0000-4000-8000-0000000000ff')).rejects.toMatchObject({
+      code: 'usuario_no_valido',
+    });
+    await expect(service.readmitir('no-es-uuid')).rejects.toMatchObject({ code: 'usuario_no_valido' });
+    expect(await store.listarExcluidos(EVENTO.id)).toEqual([]);
+  });
+
+  it('excluir guarda el id en minúsculas, es idempotente y readmitir lo devuelve', async () => {
+    const { store, service } = montar();
+    await service.excluir(ADMIN, BRUNO.toUpperCase());
+    await service.excluir(ADMIN, BRUNO);
+    expect(await store.listarExcluidos(EVENTO.id)).toEqual([BRUNO]);
+    await service.readmitir(BRUNO.toUpperCase());
+    expect(await store.listarExcluidos(EVENTO.id)).toEqual([]);
+    await service.readmitir(BRUNO);
+  });
+
+  it('el excluido no ve la invitación: la vista es 403 no_invitado', async () => {
+    const { service } = await sinBruno();
+    await expect(service.vista({ userId: BRUNO, esAdmin: false })).rejects.toMatchObject({ code: 'no_invitado', status: 403 });
+  });
+
+  it('el equipo de la vista no incluye a los excluidos', async () => {
+    const { service } = await sinBruno();
+    const { equipo } = await service.vista({ userId: ANA, esAdmin: false });
+    expect(equipo.map((m) => m.nombre)).toEqual(['Ana Ruiz', 'Carla Gómez']);
+  });
+
+  it('miEstado dice invitado: false al excluido', async () => {
+    const { service } = await sinBruno();
+    expect((await service.miEstado(BRUNO)).invitado).toBe(false);
+    expect((await service.miEstado(ANA)).invitado).toBe(true);
+  });
+
+  it('confirmar es 403 no_invitado, también con las confirmaciones cerradas', async () => {
+    const { store, service, reloj } = await sinBruno();
+    await expect(service.confirmar(BRUNO, { asiste: false })).rejects.toMatchObject({ code: 'no_invitado', status: 403 });
+    reloj.ahora = TRAS_EL_CORTE;
+    await expect(service.confirmar(BRUNO, { asiste: false })).rejects.toMatchObject({ code: 'no_invitado' });
+    expect(store.confirmaciones).toEqual([]);
+  });
+
+  it('votar: el excluido es 403 no_invitado; votar a un excluido es usuario_no_valido', async () => {
+    const { store, service, reloj } = await sinBruno();
+    await expect(service.votar(BRUNO, ANA, { cualidades: ['Empatía'] })).rejects.toMatchObject({
+      code: 'no_invitado',
+      status: 403,
+    });
+    await expect(service.votar(ANA, BRUNO, { cualidades: ['Empatía'] })).rejects.toMatchObject({
+      code: 'usuario_no_valido',
+      status: 400,
+    });
+    expect(store.votos).toEqual([]);
+    // Tras el inicio sigue mandando el cierre.
+    reloj.ahora = TRAS_EL_EVENTO;
+    await expect(service.votar(BRUNO, ANA, { cualidades: [] })).rejects.toMatchObject({ code: 'votos_cerrados' });
+  });
+
+  it('los votos de un excluido no cuentan, y al readmitirlo vuelven (nada se borra)', async () => {
+    const { store, service } = montar();
+    await service.votar(BRUNO, CARLA, { cualidades: ['Empatía'] });
+    await service.votar(ANA, CARLA, { cualidades: ['Empatía'] });
+    await service.excluir(ADMIN, BRUNO);
+    const durante = await service.vista({ userId: ANA, esAdmin: false });
+    expect(durante.equipo.find((m) => m.userId === CARLA)?.cualidades).toEqual([{ cualidad: 'Empatía', votos: 1 }]);
+    expect(await store.votosDe(EVENTO.id, BRUNO)).toHaveLength(1);
+    await service.readmitir(BRUNO);
+    const despues = await service.vista({ userId: ANA, esAdmin: false });
+    expect(despues.equipo.find((m) => m.userId === CARLA)?.cualidades).toEqual([{ cualidad: 'Empatía', votos: 2 }]);
+  });
+
+  it('el resumen deja fuera a los excluidos de filas y totales y los lista aparte; su respuesta se conserva', async () => {
+    const { service } = montar();
+    await service.confirmar(ANA, { asiste: true, preferencia: 'general' });
+    await service.confirmar(BRUNO, { asiste: true, preferencia: 'vegetariano' });
+    await service.excluir(ADMIN, BRUNO);
+    const resumen = await service.resumen();
+    expect(resumen.filas.map((f) => f.userId)).toEqual([ANA, CARLA]);
+    expect(resumen.totales).toEqual({ van: 1, noVan: 0, sinResponder: 1 });
+    expect(resumen.porPreferencia.find((p) => p.codigo === 'vegetariano')?.total).toBe(0);
+    expect(resumen.excluidos).toEqual([{ userId: BRUNO, nombre: 'Bruno Díaz' }]);
+
+    await service.readmitir(BRUNO);
+    const de_nuevo = await service.resumen();
+    expect(de_nuevo.excluidos).toEqual([]);
+    expect(de_nuevo.totales).toEqual({ van: 2, noVan: 0, sinResponder: 1 });
+    expect(de_nuevo.filas.find((f) => f.userId === BRUNO)?.preferencia).toBe('vegetariano');
+  });
+
+  it('los excluidos inactivos no salen en excluidos', async () => {
+    const { store, service } = montar();
+    await store.excluir(EVENTO.id, DIANA, ANTES_DEL_CORTE);
+    expect((await service.resumen()).excluidos).toEqual([]);
   });
 });

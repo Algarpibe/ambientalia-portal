@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { notify } from '../../lib/notify';
-import { cargarResumen } from './api';
+import { cargarResumen, excluirInvitado, mensajeDeError, readmitirInvitado } from './api';
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { filasExcel, HOJA_EXCEL, nombreFicheroExcel } from './excel';
 import { fechaHoraCorta } from './fechas';
@@ -11,7 +11,14 @@ interface Props {
   evento: Pick<Evento, 'id' | 'preferencias'>;
   /** Sube cada vez que la página recarga sus datos: el panel relee el resumen (decisión D14). */
   version: number;
+  /** El admin que mira: no puede quitarse a sí mismo de la invitación. */
+  yo: string;
+  /** Avisa a la página de que cambió quién está invitado, para que recargue. */
+  onCambio: () => void;
 }
+
+const BOTON_CHICO =
+  'rounded-lg border border-[#D5D8E2] bg-white px-2.5 py-1 text-xs font-bold text-[#3E4352] transition hover:bg-[#F4F6FA] disabled:cursor-not-allowed disabled:opacity-60';
 
 const ESTADO: Record<EstadoRespuesta, { texto: string; clase: string }> = {
   va: { texto: 'Va', clase: 'bg-[#008556]/10 text-[#008556]' },
@@ -29,10 +36,24 @@ function Cifra({ id, etiqueta, valor, color }: { id: string; etiqueta: string; v
 }
 
 /** Solo para el admin: quién va, quién no y quién falta, y el Excel para el restaurante. */
-export default function PanelAdmin({ evento, version }: Props) {
+export default function PanelAdmin({ evento, version, yo, onCambio }: Props) {
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [fallo, setFallo] = useState(false);
   const [exportando, setExportando] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+
+  const cambiarInvitacion = async (accion: () => Promise<void>, aviso: string) => {
+    setOcupado(true);
+    try {
+      await accion();
+      notify(aviso);
+      onCambio();
+    } catch (e) {
+      notify(mensajeDeError(e), 'error');
+    } finally {
+      setOcupado(false);
+    }
+  };
 
   const cargar = useCallback(async () => {
     try {
@@ -110,6 +131,7 @@ export default function PanelAdmin({ evento, version }: Props) {
                     <th className="px-3 py-2">Respuesta</th>
                     <th className="px-3 py-2">Preferencia</th>
                     <th className="px-3 py-2">Mensaje</th>
+                    <th className="px-3 py-2">Invitación</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -121,11 +143,50 @@ export default function PanelAdmin({ evento, version }: Props) {
                       </td>
                       <td className="px-3 py-2">{textoMenu(f.preferencia)}</td>
                       <td className="px-3 py-2 italic text-[#4E5362]">{f.mensaje ?? ''}</td>
+                      <td className="px-3 py-2">
+                        {f.userId !== yo && (
+                          <button
+                            type="button"
+                            disabled={ocupado}
+                            aria-label={`Quitar a ${f.nombre} de la invitación`}
+                            className={BOTON_CHICO}
+                            onClick={() =>
+                              void cambiarInvitacion(() => excluirInvitado(f.userId), `${f.nombre} ya no está en la invitación.`)
+                            }
+                          >
+                            Quitar
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {(resumen.excluidos ?? []).length > 0 && (
+              <div className="mb-5">
+                <h3 className="mb-2 text-sm font-bold text-[#3E4352]">No invitados ({resumen.excluidos.length})</h3>
+                <ul className="space-y-2">
+                  {resumen.excluidos.map((x) => (
+                    <li key={x.userId} className="flex items-center justify-between gap-3 rounded-xl bg-[#F4F6FA] px-3 py-2 text-sm">
+                      <span className="font-semibold">{x.nombre}</span>
+                      <button
+                        type="button"
+                        disabled={ocupado}
+                        aria-label={`Volver a invitar a ${x.nombre}`}
+                        className={BOTON_CHICO}
+                        onClick={() =>
+                          void cambiarInvitacion(() => readmitirInvitado(x.userId), `${x.nombre} vuelve a estar en la invitación.`)
+                        }
+                      >
+                        Volver a invitar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <button type="button" disabled={exportando} onClick={() => void exportar()} className={BOTON_PRIMARIO}>
               {exportando ? 'Generando…' : '⬇️ Descargar Excel'}

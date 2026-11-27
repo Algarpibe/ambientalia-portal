@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { contenidoIcs, fechaIcs, nombreFicheroIcs, urlGoogleCalendar, urlGoogleMaps, urlWaze } from './enlaces';
+import { contenidoIcs, fechaIcs, nombreFicheroIcs, urlGoogleCalendar } from './enlaces';
 import { eventoDePrueba } from './fixtures';
 
 describe('enlaces del evento', () => {
@@ -7,13 +7,6 @@ describe('enlaces del evento', () => {
 
   it('fechaIcs pasa a UTC en formato básico', () => {
     expect(fechaIcs('2026-12-18T12:30:00-05:00')).toBe('20261218T173000Z');
-  });
-
-  it('Maps y Waze llevan la dirección codificada', () => {
-    expect(urlGoogleMaps(evento)).toBe(
-      'https://www.google.com/maps/search/?api=1&query=Restaurante%20Anfitriona%2C%20Cl.%2083%20Bis%20%2324-09%2C%20Bogot%C3%A1%20D.C.',
-    );
-    expect(urlWaze(evento)).toBe('https://waze.com/ul?q=Cl.%2083%20Bis%20%2324-09%2C%20Bogot%C3%A1%20D.C.&navigate=yes');
   });
 
   it('Google Calendar lleva el título, las horas y el lugar', () => {

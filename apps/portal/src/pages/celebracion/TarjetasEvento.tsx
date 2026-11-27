@@ -1,6 +1,6 @@
 import { notify } from '../../lib/notify';
 import { descargarTexto } from './descargar';
-import { contenidoIcs, nombreFicheroIcs, urlGoogleCalendar, urlGoogleMaps, urlWaze } from './enlaces';
+import { contenidoIcs, nombreFicheroIcs, urlGoogleCalendar } from './enlaces';
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { fechaLarga, hora } from './fechas';
 import type { Evento } from './tipos';
@@ -49,11 +49,8 @@ export default function TarjetasEvento({ evento }: { evento: Evento }) {
           </ul>
         </div>
         <div className="flex flex-wrap gap-2.5">
-          <a className={BOTON_PRIMARIO} href={urlGoogleMaps(evento)} target="_blank" rel="noopener noreferrer">
+          <a className={BOTON_PRIMARIO} href={evento.mapsUrl} target="_blank" rel="noopener noreferrer">
             🗺️ Google Maps
-          </a>
-          <a className={BOTON} href={urlWaze(evento)} target="_blank" rel="noopener noreferrer">
-            🚗 Waze
           </a>
           <button type="button" className={BOTON} onClick={() => void copiarDireccion()}>
             📋 Copiar dirección

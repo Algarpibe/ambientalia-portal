@@ -5,6 +5,8 @@ import {
   cargarResumen,
   cargarVista,
   ErrorApi,
+  excluirInvitado,
+  readmitirInvitado,
   guardarConfirmacion,
   guardarVotos,
   mensajeDeError,
@@ -51,6 +53,19 @@ describe('api de la invitación', () => {
       method: 'PUT',
       body: JSON.stringify({ cualidades: ['Empatía'] }),
     });
+  });
+
+  it('excluirInvitado y readmitirInvitado usan PUT y DELETE sobre el usuario', async () => {
+    mockFetch.mockResolvedValue(respuesta(200, { message: 'excluido' }));
+    await excluirInvitado('u 3');
+    expect(mockFetch).toHaveBeenLastCalledWith('/api/celebracion/excluidos/u%203', { method: 'PUT' });
+    await readmitirInvitado('u 3');
+    expect(mockFetch).toHaveBeenLastCalledWith('/api/celebracion/excluidos/u%203', { method: 'DELETE' });
+  });
+
+  it('mensajeDeError traduce no_invitado y exclusion_propia', () => {
+    expect(mensajeDeError(new ErrorApi('no_invitado', 403))).toBe('Esta invitación no está disponible para tu cuenta.');
+    expect(mensajeDeError(new ErrorApi('exclusion_propia', 400))).toBe('No puedes quitarte a ti mismo de la invitación.');
   });
 
   it('subirMiFoto usa el endpoint de avatar de siempre', async () => {

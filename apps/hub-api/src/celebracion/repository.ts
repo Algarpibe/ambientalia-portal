@@ -41,6 +41,23 @@ export class CelebracionRepository implements CelebracionStore {
     }));
   }
 
+  async listarExcluidos(evento: string): Promise<string[]> {
+    const { rows } = await this.pool.query(`SELECT user_id FROM portal.celebracion_excluidos WHERE evento = $1`, [evento]);
+    return (rows as { user_id: string }[]).map((r) => r.user_id);
+  }
+
+  async excluir(evento: string, userId: string, ahora: Date): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO portal.celebracion_excluidos (evento, user_id, excluido_en) VALUES ($1, $2, $3)
+       ON CONFLICT (evento, user_id) DO NOTHING`,
+      [evento, userId, ahora],
+    );
+  }
+
+  async readmitir(evento: string, userId: string): Promise<void> {
+    await this.pool.query(`DELETE FROM portal.celebracion_excluidos WHERE evento = $1 AND user_id = $2`, [evento, userId]);
+  }
+
   async esUsuarioActivo(userId: string): Promise<boolean> {
     const { rows } = await this.pool.query(`SELECT 1 FROM portal.users WHERE id = $1 AND status = 'active'`, [userId]);
     return rows.length > 0;
@@ -52,6 +69,7 @@ export class CelebracionRepository implements CelebracionStore {
          FROM portal.celebracion_votos v
          JOIN portal.users u ON u.id = v.votante_id AND u.status = 'active'
         WHERE v.evento = $1
+          AND NOT EXISTS (SELECT 1 FROM portal.celebracion_excluidos x WHERE x.evento = v.evento AND x.user_id = v.votante_id)
         GROUP BY v.votado_id, v.cualidad`,
       [evento],
     );

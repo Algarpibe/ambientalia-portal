@@ -10,6 +10,9 @@ export const EVENTO = {
   fin: '2026-12-18T16:00:00-05:00',
   lugar: 'Restaurante Anfitriona',
   direccion: 'Cl. 83 Bis #24-09, Bogotá D.C.',
+  // Ficha del restaurante en Google Maps (la pasó el usuario)
+  mapsUrl:
+    'https://www.google.com/maps/place/Anfitriona+%7C+Cocina+de+origen+colombiano/@4.6878,-74.0807707,14z/data=!4m10!1m2!2m1!1sRestaurante+Anfitriona,+Cl.+83+Bis+%2324-09,+Bogot%C3%A1+D.C.!3m6!1s0x8e3f9b0049cc0705:0x1cfacbc7a96f4bcf!8m2!3d4.6712513!4d-74.0634439!15sCjdSZXN0YXVyYW50ZSBBbmZpdHJpb25hLCBDbC4gODMgQmlzICMyNC0wOSwgQm9nb3TDoSBELkMuWjQiMnJlc3RhdXJhbnRlIGFuZml0cmlvbmEgY2wgODMgYmlzICMyNC0wOSBib2dvdMOhIGRjkgEUY29sb21iaWFuX3Jlc3RhdXJhbnSaAURDaTlEUVVsUlFVTnZaRU5vZEhsalJqbHZUMjV3UzJWR1RYbFBSMlF6WTFkTk0yUnRkRFJqYldSR1RVVkZlRlJYWXhBQuABAPoBBAggEEo!16s%2Fg%2F11x5n6g78v',
   vestimenta: 'Smart casual',
   /** Último instante en que se puede confirmar o cambiar la respuesta. */
   cierreConfirmaciones: '2026-12-04T23:59:59-05:00',

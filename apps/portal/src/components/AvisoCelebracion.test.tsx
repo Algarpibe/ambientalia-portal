@@ -22,15 +22,16 @@ function pintar() {
 
 describe('AvisoCelebracion', () => {
   it('invita a confirmar a quien no ha respondido, con el enlace de la invitación', async () => {
-    vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: false, confirmacionesAbiertas: true });
+    vi.mocked(cargarMiEstado).mockResolvedValue({ invitado: true, respondido: false, confirmacionesAbiertas: true });
     pintar();
     const enlace = await screen.findByRole('link', { name: /Confirma tu asistencia/ });
     expect(enlace.getAttribute('href')).toBe('/celebracion-navidad-2026');
   });
 
   it.each([
-    ['ya respondió', () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: true, confirmacionesAbiertas: true })],
-    ['ya cerró', () => vi.mocked(cargarMiEstado).mockResolvedValue({ respondido: false, confirmacionesAbiertas: false })],
+    ['ya respondió', () => vi.mocked(cargarMiEstado).mockResolvedValue({ invitado: true, respondido: true, confirmacionesAbiertas: true })],
+    ['ya cerró', () => vi.mocked(cargarMiEstado).mockResolvedValue({ invitado: true, respondido: false, confirmacionesAbiertas: false })],
+    ['no está invitado', () => vi.mocked(cargarMiEstado).mockResolvedValue({ invitado: false, respondido: false, confirmacionesAbiertas: true })],
     ['falla la consulta', () => vi.mocked(cargarMiEstado).mockRejectedValue(new Error('red'))],
   ])('no sale si %s', async (_caso, preparar) => {
     preparar();

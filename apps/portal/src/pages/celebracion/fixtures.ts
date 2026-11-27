@@ -14,6 +14,7 @@ export function eventoDePrueba(cambios: Partial<Evento> = {}): Evento {
     fin: '2026-12-18T16:00:00-05:00',
     lugar: 'Restaurante Anfitriona',
     direccion: 'Cl. 83 Bis #24-09, Bogotá D.C.',
+    mapsUrl: 'https://www.google.com/maps/place/Ejemplo',
     vestimenta: 'Smart casual',
     cierreConfirmaciones: '2026-12-04T23:59:59-05:00',
     confirmacionesAbiertas: true,
@@ -71,5 +72,6 @@ export function resumenDePrueba(): Resumen {
       { userId: BRUNO, nombre: 'Bruno Díaz', estado: 'no_va', preferencia: null, mensaje: null, actualizadoEn: '2026-12-02T15:00:00.000Z' },
       { userId: CARLA, nombre: 'Carla Gómez', estado: 'sin_responder', preferencia: null, mensaje: null, actualizadoEn: null },
     ],
+    excluidos: [],
   };
 }

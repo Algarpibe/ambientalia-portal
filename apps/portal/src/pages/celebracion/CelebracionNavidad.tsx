@@ -47,6 +47,7 @@ function Centro({ children }: { children: ReactNode }) {
 export default function CelebracionNavidad() {
   const [vista, setVista] = useState<Vista | null>(null);
   const [fallo, setFallo] = useState(false);
+  const [noInvitado, setNoInvitado] = useState(false);
   const [abierta, setAbierta] = useState(false);
   const [brindisPara, setBrindisPara] = useState<Miembro | null>(null);
   const [version, setVersion] = useState(0);
@@ -56,8 +57,10 @@ export default function CelebracionNavidad() {
     try {
       setVista(await cargarVista());
       setFallo(false);
+      setNoInvitado(false);
       setVersion((v) => v + 1);
-    } catch {
+    } catch (e) {
+      setNoInvitado(e instanceof ErrorApi && e.codigo === 'no_invitado');
       setFallo(true);
     }
   }, []);
@@ -81,7 +84,14 @@ export default function CelebracionNavidad() {
   if (!vista) {
     return (
       <Centro>
-        {fallo ? (
+        {noInvitado ? (
+          <>
+            <p className="font-semibold text-[#3E4352]">Esta invitación no está disponible para tu cuenta.</p>
+            <a href="/" className={BOTON}>
+              Ir al Inicio
+            </a>
+          </>
+        ) : fallo ? (
           <>
             <p className="font-semibold text-[#3E4352]">No se pudo cargar la invitación.</p>
             <button type="button" className={BOTON} onClick={() => void recargar()}>
@@ -241,7 +251,7 @@ export default function CelebracionNavidad() {
           </Tarjeta>
         </section>
 
-        {vista.esAdmin && <PanelAdmin evento={evento} version={version} />}
+        {vista.esAdmin && <PanelAdmin evento={evento} version={version} yo={vista.yo} onCambio={() => void recargar()} />}
 
         <footer className="mt-10 text-center text-sm text-gray-500">
           <strong>Ambientalia S.A.S.</strong> · {evento.titulo}

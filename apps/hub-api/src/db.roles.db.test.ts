@@ -212,6 +212,14 @@ describe('el rol de las peticiones (portal_app)', () => {
     expect(rows[0]).toEqual({ borra: false, reemplaza: true, edita: false, retira: true });
   });
 
+  it('portal_app quita y readmite invitados pero no edita las exclusiones (082)', async () => {
+    const { rows } = await migrador.query(
+      `SELECT has_table_privilege('portal_app', 'portal.celebracion_excluidos', 'DELETE') AS retira,
+              has_table_privilege('portal_app', 'portal.celebracion_excluidos', 'UPDATE') AS edita`,
+    );
+    expect(rows[0]).toEqual({ retira: true, edita: false });
+  });
+
   it('dar los permisos en cada arranque no espera a las peticiones que están en curso', async () => {
     // La 068 corre en CADA arranque, y en un despliegue el contenedor viejo sigue
     // atendiendo mientras arranca el nuevo (DATA-340). Si el GRANT esperara a una

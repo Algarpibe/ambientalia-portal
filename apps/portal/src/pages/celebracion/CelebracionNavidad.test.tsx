@@ -4,7 +4,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import CelebracionNavidad from './CelebracionNavidad';
 import { cargarVista, ErrorApi, guardarConfirmacion } from './api';
 import { notify } from '../../lib/notify';
-import { vistaDePrueba } from './fixtures';
+import { eventoDePrueba, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
@@ -42,6 +42,13 @@ describe('CelebracionNavidad', () => {
     expect(screen.getByRole('timer', { name: 'Cuenta atrás' })).toBeTruthy();
   });
 
+  it('Google Maps abre la ficha exacta del restaurante y no hay Waze', async () => {
+    await abrir();
+    const maps = screen.getByRole('link', { name: /Google Maps/ });
+    expect(maps.getAttribute('href')).toBe(eventoDePrueba().mapsUrl);
+    expect(screen.queryByRole('link', { name: /Waze/ })).toBeNull();
+  });
+
   it('tapa el contenido (inert) hasta abrir y luego enfoca el título', async () => {
     const { container } = render(<CelebracionNavidad />);
     await screen.findByRole('button', { name: /Abrir invitación/ });
@@ -59,6 +66,14 @@ describe('CelebracionNavidad', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Reintentar' }));
     expect(await screen.findByRole('button', { name: /Abrir invitación/ })).toBeTruthy();
     expect(cargarVista).toHaveBeenCalledTimes(2);
+  });
+
+  it('si no está invitado, lo dice y lleva al Inicio sin reintentar', async () => {
+    vi.mocked(cargarVista).mockRejectedValue(new ErrorApi('no_invitado', 403));
+    render(<CelebracionNavidad />);
+    expect(await screen.findByText('Esta invitación no está disponible para tu cuenta.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Ir al Inicio' }).getAttribute('href')).toBe('/');
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
   });
 
   it('confirmar guarda, avisa y vuelve a cargar', async () => {
