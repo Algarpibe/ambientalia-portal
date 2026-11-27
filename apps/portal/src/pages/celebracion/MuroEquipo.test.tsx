@@ -94,13 +94,15 @@ describe('MuroEquipo', () => {
   });
 
   it('con las cualidades ocultas, cada tarjeta dice que se desvelan el día del almuerzo, sin pistas, y los botones siguen', () => {
-    pintar({ cualidadesOcultas: true, equipo: vistaDeEmpleado().equipo });
+    // El equipo CON cualidades (Bruno trae dos): si la rama oculta no existiera, saldrían.
+    pintar({ cualidadesOcultas: true, equipo: equipoDePrueba() });
     for (const nombre of ['Ana Ruiz', 'Bruno Díaz', 'Carla Gómez']) {
       expect(within(tarjeta(nombre)).getByText('🤫 Se desvelan el día del almuerzo')).toBeTruthy();
     }
     expect(screen.queryByText('Aún nadie ha brindado por ti.')).toBeNull();
     expect(screen.queryByText(/Sé el primero en brindar/)).toBeNull();
     expect(screen.queryByText(/✨/)).toBeNull();
+    expect(screen.queryByText(/Empatía|Liderazgo|· \d/)).toBeNull();
     expect(within(tarjeta('Bruno Díaz')).getByRole('button', { name: /Enviar brindis/ })).toBeTruthy();
     expect(within(tarjeta('Ana Ruiz')).getByLabelText(/foto graciosa/)).toBeTruthy();
   });

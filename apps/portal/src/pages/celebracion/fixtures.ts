@@ -59,7 +59,7 @@ export function vistaDePrueba(cambios: Partial<Vista> = {}): Vista {
     misVotos: {},
     // El equipo de prueba son 3 personas: ya brindé por las otras 2 y la confirmación está libre.
     brindis: { dados: 2, minimo: 2 },
-    // Como la ve el admin: las pruebas del muro pintan las cualidades. La del empleado es vistaDeEmpleado().
+    // Cualidades visibles (como las ve el admin) sin pintar PanelAdmin; la vista realista de un empleado es vistaDeEmpleado().
     cualidadesOcultas: false,
     ...cambios,
   };
