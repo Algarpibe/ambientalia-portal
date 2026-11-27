@@ -66,22 +66,24 @@ export default function Prospectos({ data, onBack }: Props) {
   // Cada resultado lleva la clave de su consulta: si cambian los NIT o se
   // reintenta, el viejo deja de valer y la vista vuelve a «Consultando…».
   const clave = `${claveNits}#${intento}`;
+  // El efecto guarda el resultado con esa misma `clave` (no la rehace): si las
+  // dos se escribieran por separado y se separaran, la vista se quedaría en
+  // «Consultando…» para siempre. `intento` entra a través de `clave`.
   useEffect(() => {
     const controller = new AbortController();
-    const deEstaConsulta = `${claveNits}#${intento}`;
     fetchClientesZoho(claveNits === '' ? [] : claveNits.split(','), controller.signal).then(
       (cruce) => {
-        if (!controller.signal.aborted) setResultado({ clave: deEstaConsulta, cruce });
+        if (!controller.signal.aborted) setResultado({ clave, cruce });
       },
       (error: unknown) => {
         // Al cerrar la vista se aborta: eso no es un error que haya que enseñar.
         if (controller.signal.aborted) return;
         console.warn('No se pudo consultar Zoho', error);
-        setResultado({ clave: deEstaConsulta, cruce: null });
+        setResultado({ clave, cruce: null });
       },
     );
     return () => controller.abort();
-  }, [claveNits, intento]);
+  }, [claveNits, clave]);
 
   const estadoCruce = estadoDelCruce(resultado, clave);
   const reintentar = () => setIntento((n) => n + 1);
