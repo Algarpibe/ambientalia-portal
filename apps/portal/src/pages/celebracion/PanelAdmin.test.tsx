@@ -2,17 +2,20 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import PanelAdmin from './PanelAdmin';
-import { cargarResumen, ErrorApi, excluirInvitado, readmitirInvitado } from './api';
-import { BRUNO, CARLA, eventoDePrueba, resumenDePrueba, YO } from './fixtures';
+import { cargarCualidades, cargarResumen, ErrorApi, excluirInvitado, readmitirInvitado } from './api';
+import { BRUNO, CARLA, cualidadesDePrueba, eventoDePrueba, resumenDePrueba, YO } from './fixtures';
 import { notify } from '../../lib/notify';
+import { entrarPantallaCompleta, salirPantallaCompleta } from './pantallaCompleta';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   cargarResumen: vi.fn(),
+  cargarCualidades: vi.fn(),
   excluirInvitado: vi.fn(),
   readmitirInvitado: vi.fn(),
 }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
+vi.mock('./pantallaCompleta', () => ({ entrarPantallaCompleta: vi.fn(), salirPantallaCompleta: vi.fn() }));
 
 afterEach(() => {
   cleanup();
@@ -91,5 +94,32 @@ describe('PanelAdmin', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Quitar a Bruno Díaz de la invitación' }));
     await waitFor(() => expect(notify).toHaveBeenCalledWith('No puedes quitarte a ti mismo de la invitación.', 'error'));
     expect(onCambio).not.toHaveBeenCalled();
+  });
+
+  it('«Presentar cualidades» pide la pantalla completa en el mismo clic y solo entonces carga las cualidades; «Cerrar» sale de ella', async () => {
+    vi.mocked(cargarResumen).mockResolvedValue(resumenDePrueba());
+    vi.mocked(cargarCualidades).mockResolvedValue(cualidadesDePrueba());
+    pintar();
+    await screen.findByTestId('cifra-van');
+    expect(cargarCualidades).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Presentar cualidades/ }));
+    expect(entrarPantallaCompleta).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'Presentación de cualidades' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Ana Ruiz' })).toBeTruthy();
+    expect(cargarCualidades).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(salirPantallaCompleta).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-presentacion-cualidades]')).toBeNull();
+  });
+
+  it('«Presentar cualidades» no depende del resumen: sigue ahí aunque falle', async () => {
+    vi.mocked(cargarResumen).mockRejectedValue(new Error('red'));
+    pintar();
+    await screen.findByRole('button', { name: 'Reintentar' });
+    expect(screen.getByRole('button', { name: /Presentar cualidades/ })).toBeTruthy();
   });
 });
