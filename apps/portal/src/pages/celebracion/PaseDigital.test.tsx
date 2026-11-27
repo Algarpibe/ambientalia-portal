@@ -26,5 +26,6 @@ describe('PaseDigital', () => {
     expect(pase.textContent).toContain('“¡Allá estaré!”');
     expect(pase.querySelector('canvas')).toBeNull();
     expect(screen.getByRole('button', { name: /Descargar pase/ })).toBeTruthy();
+    expect(screen.getByText('¿No se descarga? Tómale una captura de pantalla a tu pase.')).toBeTruthy();
   });
 });

@@ -31,7 +31,7 @@ export default function PaseDigital({ nombre, evento, respuesta }: Props) {
     setDescargando(true);
     try {
       descargarUrl(nombreFicheroPase(evento.id, nombre), await dibujarPase(datos, logo));
-      notify('📸 Pase descargado.');
+      notify('📸 Pase listo. Si no se descargó, tómale una captura a la tarjeta.');
     } catch {
       notify('No se pudo generar el pase. Vuelve a intentarlo.', 'error');
     } finally {
@@ -75,6 +75,7 @@ export default function PaseDigital({ nombre, evento, respuesta }: Props) {
         <button type="button" disabled={descargando} onClick={() => void descargar()} className={`${BOTON_PRIMARIO} w-full max-w-xs`}>
           {descargando ? 'Generando…' : '📸 Descargar pase (PNG)'}
         </button>
+        <p className="mt-2 text-xs text-gray-500">¿No se descarga? Tómale una captura de pantalla a tu pase.</p>
       </div>
     </div>
   );

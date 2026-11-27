@@ -17,6 +17,13 @@ export function lineasPase(d: DatosPase): string[] {
   return [`📅 ${d.fecha} · ${d.hora}`, `📍 ${d.lugar}`, `🍽️ Preferencia: ${d.preferencia}`];
 }
 
+export const MENSAJE_PASE_MAX = 90;
+
+/** Recorta el mensaje para que quepa legible en el lienzo. */
+export function mensajeParaPase(mensaje: string): string {
+  return mensaje.length <= MENSAJE_PASE_MAX ? mensaje : `${mensaje.slice(0, MENSAJE_PASE_MAX - 1)}…`;
+}
+
 export function nombreFicheroPase(eventoId: string, nombre: string): string {
   const limpio = nombre
     .normalize('NFD')
@@ -78,7 +85,7 @@ export async function dibujarPase(d: DatosPase, logoUrl: string): Promise<string
   if (d.mensaje) {
     ctx.fillStyle = '#4E5362';
     ctx.font = 'italic 18px sans-serif';
-    ctx.fillText(`“${d.mensaje}”`, 44, 400, 712);
+    ctx.fillText(`“${mensajeParaPase(d.mensaje)}”`, 44, 400, 712);
   }
   return lienzo.toDataURL('image/png');
 }
