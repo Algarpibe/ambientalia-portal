@@ -14,6 +14,26 @@ describe('EQUIPMENT_MAP', () => {
     }
   });
 
+  // Revisadas contra la lista de la EPA del 28 de julio de 2026.
+  it('las entradas del prototipo que no cuadraban con la lista de la EPA, corregidas', () => {
+    expect(EQUIPMENT_MAP['EQPM-0308-170'].model).toBe('BAM-1020 / APDA-371 / Spirant BAM1100');
+    expect(EQUIPMENT_MAP['EQPM-0715-266'].model).toBe('BAM-1020 / Spirant BAM1100');
+    expect(EQUIPMENT_MAP['RFSA-0616-237']).toEqual({ brand: 'Sutron / Sabio', model: '6020 SO2 Analyzer', pollutant: 'SO₂' });
+    expect(EQUIPMENT_MAP['EQPM-0923-262'].model).toBe('Vair-9009');
+    expect(EQUIPMENT_MAP['EQPM-0798-122'].brand).toContain('Horiba');
+  });
+
+  // Entradas añadidas que dejaban fuera variantes de modelo que nombra la lista.
+  it('las entradas añadidas con variantes de modelo que faltaban, completadas', () => {
+    expect(EQUIPMENT_MAP['EQOA-0193-091'].model).toBe(
+      'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 (-11, -12) / ML9810B / CM2010B / EC9810B / 1010',
+    );
+    expect(EQUIPMENT_MAP['EQSA-0193-092'].model).toBe(
+      'ML9850 / CM2050 / EC9850 / EC9850T / AE9850 / AE2050 / ML9850B / CM2050B / EC9850B / 1040',
+    );
+    expect(EQUIPMENT_MAP['RFNA-0118-249'].model).toBe('AC32e / AC32e*');
+  });
+
   // Una errata al copiar un código nuevo lo dejaría sin reconocer en silencio.
   it('cada código EPA tiene la forma XXXX-0000-000', () => {
     for (const code of Object.keys(EQUIPMENT_MAP)) {
@@ -26,8 +46,8 @@ describe('EQUIPMENT_MAP', () => {
 describe('extractEquipment', () => {
   it('reconoce un código de equipo dentro del texto del método', () => {
     const eq = extractEquipment('Método de referencia EQPM-0798-122 según protocolo');
-    expect(eq?.brand).toBe('Met One Instruments, Inc.');
-    expect(eq?.model).toBe('BAM 1020');
+    expect(eq?.brand).toBe('Met One Instruments, Inc. / Sibata / Horiba / Ecotech / Acoem');
+    expect(eq?.model).toBe('BAM 1020 / GBAM 1020 / APDA-371 / Spirant BAM1000');
     expect(eq?.pollutant).toBe('Partículas');
   });
 
@@ -90,7 +110,7 @@ describe('listBrands / listModels', () => {
   });
 
   it('lista los modelos de una marca', () => {
-    expect(listModels('Horiba')).toEqual(['APMA-370', 'APNA-370', 'APOA-370', 'APSA-370']);
+    expect(listModels('Horiba')).toEqual(['APMA-370 / 380', 'APNA-370 / 380', 'APOA-370 / 380', 'APSA-370 / 380']);
   });
 
   it('devuelve lista vacía para una marca desconocida', () => {
