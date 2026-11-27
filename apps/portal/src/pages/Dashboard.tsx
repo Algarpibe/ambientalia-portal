@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { BarChart3, Search, Bell, Plus, Pencil, Check, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import AvisoCelebracion from '../components/AvisoCelebracion';
 import { useWidgetRegistry } from '../hooks/useWidgetRegistry';
 import { useDashboardLayout } from '../hooks/useDashboardLayout';
 import WidgetGrid from '../components/WidgetGrid';
@@ -64,6 +65,8 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      <AvisoCelebracion />
 
       {/* Controles del dashboard de widgets */}
       <div className="flex items-center justify-between gap-4 mb-6">

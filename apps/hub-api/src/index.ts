@@ -15,6 +15,9 @@ import { urlPortal } from './ausencias/config.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
 import { createAusenciasRouter } from './ausencias/router.js';
+import { createCelebracionRouter } from './celebracion/router.js';
+import { CelebracionService } from './celebracion/service.js';
+import { CelebracionRepository } from './celebracion/repository.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
 import { createLaboratoriosRouter } from './laboratorios/router.js';
 import { createTrazabilidadRouter } from './trazabilidad/router.js';
@@ -159,6 +162,11 @@ initDb()
     app.use('/api', createContabilidadRouter(getHubPool()));
     // Router de la app de vacaciones/permisos/compensatorios/incapacidades.
     app.use('/api', createAusenciasRouter(getHubPool()));
+    // Invitación al almuerzo de fin de año: cualquier usuario activo, sin app asignada.
+    app.use('/api', createCelebracionRouter(new CelebracionService({
+      store: new CelebracionRepository(getHubPool()),
+      now: () => new Date(),
+    })));
     // Router de Calibraciones (patrones de transferencia de O3, ISO/IEC 17025).
     app.use('/api', createCalibracionesRouter(getHubPool()));
     // Cruce de los prospectos de Laboratorios ambientales con Zoho por NIT.

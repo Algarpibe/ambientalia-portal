@@ -1,0 +1,257 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import request from 'supertest';
+import jwt from 'jsonwebtoken';
+import { captureError } from '../sentry.js';
+import { CelebracionError } from './dominio.js';
+import type { CelebracionActions } from './router.js';
+
+// requireAuth lee JWT_SECRET al cargar auth.ts: se fija antes del import dinámico.
+const SECRET = 'test-secret-celebracion';
+process.env.JWT_SECRET = SECRET;
+
+// requireAuth consulta la fila del usuario (rol, estado, token_version) con
+// params[0] = user_id; aquí el rol sale de este mapa.
+const roles = vi.hoisted(() => new Map<string, string>());
+vi.mock('../db.js', () => ({
+  getHubPool: () => ({
+    query: async (_sql: string, params: unknown[] = []) => ({
+      rows: [{ role: roles.get(String(params[0] ?? '')) ?? 'reader', status: 'active', apps: [], token_version: 0 }],
+      rowCount: 1,
+    }),
+    on: () => {},
+  }),
+}));
+vi.mock('../sentry.js', () => ({ captureError: vi.fn() }));
+
+const { createCelebracionRouter } = await import('./router.js');
+
+const ANA = '00000000-0000-4000-8000-00000000000a';
+const BRUNO = '00000000-0000-4000-8000-00000000000b';
+const ADMIN = '00000000-0000-4000-8000-0000000000ad';
+
+function cabecera(userId: string, role = 'reader') {
+  roles.set(userId, role);
+  const token = jwt.sign({ sub: `${userId}@example.com`, user_id: userId, role, apps: [], token_version: 0 }, SECRET);
+  return { Authorization: `Bearer ${token}` };
+}
+
+function stub(parcial: Partial<CelebracionActions> = {}): CelebracionActions {
+  return {
+    vista: vi.fn(async () => ({ hola: 'vista' }) as never),
+    miEstado: vi.fn(async () => ({ respondido: false, confirmacionesAbiertas: true, invitado: true })),
+    confirmar: vi.fn(async () => {}),
+    votar: vi.fn(async () => {}),
+    excluir: vi.fn(async () => {}),
+    readmitir: vi.fn(async () => {}),
+    subirFoto: vi.fn(async () => {}),
+    resumen: vi.fn(async () => ({ hola: 'resumen' }) as never),
+    cualidadesEquipo: vi.fn(async () => ({ equipo: [] })),
+    ...parcial,
+  };
+}
+
+function montar(service: CelebracionActions) {
+  const app = express();
+  app.use(express.json());
+  app.use('/api', createCelebracionRouter(service));
+  return app;
+}
+
+const leer = (ruta: string) => readFileSync(fileURLToPath(new URL(ruta, import.meta.url)), 'utf8');
+
+afterEach(() => {
+  vi.mocked(captureError).mockClear();
+  roles.clear();
+});
+
+describe('router de la invitación', () => {
+  it('sin sesión es 401', async () => {
+    const res = await request(montar(stub())).get('/api/celebracion');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /celebracion pasa quién soy y si soy admin', async () => {
+    const service = stub();
+    const res = await request(montar(service)).get('/api/celebracion').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hola: 'vista' });
+    expect(service.vista).toHaveBeenCalledWith({ userId: ADMIN, esAdmin: true });
+  });
+
+  it('GET /celebracion pasa esAdmin: false a quien no es admin, aunque su token diga admin y la BD diga lector', async () => {
+    const service = stub();
+    const app = montar(service);
+    const conTokenDeAdmin = cabecera(ANA, 'admin');
+    roles.set(ANA, 'reader'); // requireAuth sustituye el rol del token por el de la BD
+    const res = await request(app).get('/api/celebracion').set(conTokenDeAdmin);
+    expect(res.status).toBe(200);
+    expect(service.vista).toHaveBeenCalledWith({ userId: ANA, esAdmin: false });
+    vi.mocked(service.vista).mockClear();
+    await request(app).get('/api/celebracion').set(cabecera(BRUNO));
+    expect(service.vista).toHaveBeenCalledWith({ userId: BRUNO, esAdmin: false });
+  });
+
+  it('GET /celebracion/mi-estado responde el estado de la persona', async () => {
+    const service = stub();
+    const res = await request(montar(service)).get('/api/celebracion/mi-estado').set(cabecera(ANA));
+    expect(res.body).toEqual({ respondido: false, confirmacionesAbiertas: true, invitado: true });
+    expect(service.miEstado).toHaveBeenCalledWith(ANA);
+  });
+
+  it('PUT /celebracion/confirmacion pasa el cuerpo tal cual', async () => {
+    const service = stub();
+    const res = await request(montar(service))
+      .put('/api/celebracion/confirmacion')
+      .set(cabecera(ANA))
+      .send({ asiste: true, preferencia: 'general' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'confirmacion_guardada' });
+    expect(service.confirmar).toHaveBeenCalledWith(ANA, { asiste: true, preferencia: 'general' });
+  });
+
+  it('PUT /celebracion/mi-foto pasa quién soy y el cuerpo, y foto_invalida es 400', async () => {
+    const service = stub();
+    const res = await request(montar(service))
+      .put('/api/celebracion/mi-foto')
+      .set(cabecera(ANA))
+      .send({ foto: 'data:image/jpeg;base64,AAAA' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'foto_guardada' });
+    expect(service.subirFoto).toHaveBeenCalledWith(ANA, { foto: 'data:image/jpeg;base64,AAAA' });
+
+    const mala = stub({
+      subirFoto: vi.fn(async () => {
+        throw new CelebracionError('foto_invalida');
+      }),
+    });
+    const rechazo = await request(montar(mala)).put('/api/celebracion/mi-foto').set(cabecera(ANA)).send({ foto: 'x' });
+    expect(rechazo.status).toBe(400);
+    expect(rechazo.body).toEqual({ error: 'foto_invalida' });
+    const sinSesion = await request(montar(service)).put('/api/celebracion/mi-foto').send({});
+    expect(sinSesion.status).toBe(401);
+  });
+
+  it('PUT /celebracion/votos/:userId pasa votante, votado y cuerpo', async () => {
+    const service = stub();
+    const res = await request(montar(service))
+      .put(`/api/celebracion/votos/${BRUNO}`)
+      .set(cabecera(ANA))
+      .send({ cualidades: ['Empatía'] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'votos_guardados' });
+    expect(service.votar).toHaveBeenCalledWith(ANA, BRUNO, { cualidades: ['Empatía'] });
+  });
+
+  it('un CelebracionError sale con su código: 400 o 409, nunca 401', async () => {
+    const service = stub({
+      votar: vi.fn(async () => {
+        throw new CelebracionError('voto_propio');
+      }),
+      confirmar: vi.fn(async () => {
+        throw new CelebracionError('confirmaciones_cerradas');
+      }),
+    });
+    const app = montar(service);
+    const voto = await request(app).put(`/api/celebracion/votos/${ANA}`).set(cabecera(ANA)).send({ cualidades: [] });
+    expect(voto.status).toBe(400);
+    expect(voto.body).toEqual({ error: 'voto_propio' });
+    const conf = await request(app).put('/api/celebracion/confirmacion').set(cabecera(ANA)).send({ asiste: false });
+    expect(conf.status).toBe(409);
+    expect(conf.body).toEqual({ error: 'confirmaciones_cerradas' });
+    expect(captureError).not.toHaveBeenCalled();
+  });
+
+  it('cualquier otro error es 500 genérico y va a Sentry', async () => {
+    const service = stub({
+      vista: vi.fn(async () => {
+        throw new Error('la BD se cayó');
+      }),
+    });
+    const res = await request(montar(service)).get('/api/celebracion').set(cabecera(ANA));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'internal error' });
+    expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'celebracion_vista' });
+  });
+
+  it('GET /celebracion/resumen es solo para admin', async () => {
+    const service = stub();
+    const app = montar(service);
+    expect((await request(app).get('/api/celebracion/resumen').set(cabecera(ANA))).status).toBe(403);
+    expect(service.resumen).not.toHaveBeenCalled();
+    const res = await request(app).get('/api/celebracion/resumen').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hola: 'resumen' });
+  });
+
+  it('GET /celebracion/cualidades es solo para admin: a los demás, 403 forbidden sin tocar el servicio', async () => {
+    const service = stub();
+    const app = montar(service);
+    const empleado = await request(app).get('/api/celebracion/cualidades').set(cabecera(ANA));
+    expect(empleado.status).toBe(403);
+    expect(empleado.body).toEqual({ error: 'forbidden' });
+    expect(service.cualidadesEquipo).not.toHaveBeenCalled();
+    const res = await request(app).get('/api/celebracion/cualidades').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ equipo: [] });
+    expect(service.cualidadesEquipo).toHaveBeenCalledTimes(1);
+  });
+
+  it('si GET /celebracion/cualidades falla, es 500 genérico y va a Sentry con su endpoint', async () => {
+    const service = stub({
+      cualidadesEquipo: vi.fn(async () => {
+        throw new Error('la BD se cayó');
+      }),
+    });
+    const res = await request(montar(service)).get('/api/celebracion/cualidades').set(cabecera(ADMIN, 'admin'));
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'internal error' });
+    expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'celebracion_cualidades' });
+  });
+
+  it('PUT y DELETE /celebracion/excluidos/:userId son solo para admin', async () => {
+    const service = stub();
+    const app = montar(service);
+    const put = await request(app).put(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ANA));
+    const del = await request(app).delete(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ANA));
+    expect(put.status).toBe(403);
+    expect(put.body).toEqual({ error: 'forbidden' });
+    expect(del.status).toBe(403);
+    expect(del.body).toEqual({ error: 'forbidden' });
+    expect(service.excluir).not.toHaveBeenCalled();
+    expect(service.readmitir).not.toHaveBeenCalled();
+  });
+
+  it('el admin quita y readmite: pasa su id y el de la persona', async () => {
+    const service = stub();
+    const app = montar(service);
+    const put = await request(app).put(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ADMIN, 'admin'));
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual({ message: 'excluido' });
+    expect(service.excluir).toHaveBeenCalledWith(ADMIN, BRUNO);
+    const del = await request(app).delete(`/api/celebracion/excluidos/${BRUNO}`).set(cabecera(ADMIN, 'admin'));
+    expect(del.status).toBe(200);
+    expect(del.body).toEqual({ message: 'readmitido' });
+    expect(service.readmitir).toHaveBeenCalledWith(BRUNO);
+  });
+
+  it('un no_invitado sale como 403 con su código', async () => {
+    const service = stub({
+      vista: vi.fn(async () => {
+        throw new CelebracionError('no_invitado');
+      }),
+    });
+    const res = await request(montar(service)).get('/api/celebracion').set(cabecera(BRUNO));
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'no_invitado' });
+    expect(captureError).not.toHaveBeenCalled();
+  });
+
+  it('index.ts lo monta en /api con el servicio y el repositorio reales', () => {
+    expect(leer('../index.ts')).toMatch(
+      /app\.use\('\/api', createCelebracionRouter\(new CelebracionService\(\{\s*store: new CelebracionRepository\(getHubPool\(\)\),/,
+    );
+  });
+});
