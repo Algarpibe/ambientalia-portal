@@ -49,6 +49,13 @@ describe('CelebracionNavidad', () => {
     expect(screen.queryByRole('link', { name: /Waze/ })).toBeNull();
   });
 
+  it('el calendario se agrega solo con Google Calendar: no hay botón ni enlace .ics', async () => {
+    await abrir();
+    expect(screen.getByRole('link', { name: /Google Calendar/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /\.ics/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /\.ics/ })).toBeNull();
+  });
+
   it('tapa el contenido (inert) hasta abrir y luego enfoca el título', async () => {
     const { container } = render(<CelebracionNavidad />);
     await screen.findByRole('button', { name: /Abrir invitación/ });

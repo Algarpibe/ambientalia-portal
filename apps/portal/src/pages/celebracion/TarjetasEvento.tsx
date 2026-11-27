@@ -1,6 +1,5 @@
 import { notify } from '../../lib/notify';
-import { descargarTexto } from './descargar';
-import { contenidoIcs, nombreFicheroIcs, urlGoogleCalendar } from './enlaces';
+import { urlGoogleCalendar } from './enlaces';
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { fechaLarga, hora } from './fechas';
 import type { Evento } from './tipos';
@@ -29,11 +28,6 @@ export default function TarjetasEvento({ evento }: { evento: Evento }) {
     } catch {
       notify('No se pudo copiar la dirección.', 'error');
     }
-  };
-
-  const descargarIcs = () => {
-    descargarTexto(nombreFicheroIcs(evento), contenidoIcs(evento, new Date()), 'text/calendar;charset=utf-8');
-    notify('📅 Evento descargado para tu calendario.');
   };
 
   return (
@@ -72,9 +66,6 @@ export default function TarjetasEvento({ evento }: { evento: Evento }) {
           <a className={BOTON} href={urlGoogleCalendar(evento)} target="_blank" rel="noopener noreferrer">
             📆 Google Calendar
           </a>
-          <button type="button" className={BOTON} onClick={descargarIcs}>
-            ⬇️ Descargar .ics
-          </button>
         </div>
       </Tarjeta>
     </div>
