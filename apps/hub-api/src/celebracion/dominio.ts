@@ -6,6 +6,7 @@ import { CUALIDADES, EVENTO, MAX_CUALIDADES, MENSAJE_MAX, PREFERENCIAS } from '.
 
 export type CodigoError =
   | 'confirmaciones_cerradas'
+  | 'faltan_brindis'
   | 'votos_cerrados'
   | 'asiste_invalido'
   | 'preferencia_invalida'
@@ -17,7 +18,11 @@ export type CodigoError =
   | 'no_invitado'
   | 'exclusion_propia';
 
-const CIERRES: ReadonlySet<CodigoError> = new Set<CodigoError>(['confirmaciones_cerradas', 'votos_cerrados']);
+const CIERRES: ReadonlySet<CodigoError> = new Set<CodigoError>([
+  'confirmaciones_cerradas',
+  'votos_cerrados',
+  'faltan_brindis',
+]);
 
 /** Error de negocio: el router lo traduce a 409 (cierres), 403 (no invitado) o 400 (lo demás), nunca a 401. */
 export class CelebracionError extends Error {

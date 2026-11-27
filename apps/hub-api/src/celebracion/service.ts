@@ -78,6 +78,8 @@ export interface Vista {
   equipo: MiembroVista[];
   miRespuesta: Omit<Confirmacion, 'userId'> | null;
   misVotos: Record<string, string[]>;
+  /** Brindis por compañeros invitados distintos que llevo y los que hacen falta para responder. */
+  brindis: { dados: number; minimo: number };
 }
 
 export interface MiEstado {
@@ -127,6 +129,14 @@ export class CelebracionService {
     return { equipo: todos.filter((m) => !excluidos.has(m.userId.toLowerCase())), excluidos, todos };
   }
 
+  /** Compañeros invitados distintos por los que `mios` brindó, frente a todos los demás invitados (hay que brindar por todos). */
+  private brindis(equipo: readonly Miembro[], mios: readonly VotoPropio[], userId: string): { dados: number; minimo: number } {
+    const yo = userId.toLowerCase();
+    const invitados = new Set(equipo.map((m) => m.userId.toLowerCase()));
+    const votados = new Set(mios.map((v) => v.votadoId.toLowerCase()).filter((id) => id !== yo && invitados.has(id)));
+    return { dados: votados.size, minimo: Math.max(0, equipo.length - 1) };
+  }
+
   async vista(sesion: Sesion): Promise<Vista> {
     const ahora = this.now();
     const [{ equipo, excluidos }, conteos, mios, confirmacion] = await Promise.all([
@@ -172,6 +182,7 @@ export class CelebracionService {
           }
         : null,
       misVotos,
+      brindis: this.brindis(equipo, mios, sesion.userId),
     };
   }
 
@@ -195,6 +206,9 @@ export class CelebracionService {
     const ahora = this.now();
     if (this.esta(await this.store.listarExcluidos(EVENTO.id), userId)) throw new CelebracionError('no_invitado');
     if (!confirmacionesAbiertas(ahora)) throw new CelebracionError('confirmaciones_cerradas');
+    const [{ equipo }, mios] = await Promise.all([this.invitados(), this.store.votosDe(EVENTO.id, userId)]);
+    const { dados, minimo } = this.brindis(equipo, mios, userId);
+    if (dados < minimo) throw new CelebracionError('faltan_brindis');
     await this.store.guardarConfirmacion(EVENTO.id, userId, parseConfirmacion(body), ahora);
   }
 
