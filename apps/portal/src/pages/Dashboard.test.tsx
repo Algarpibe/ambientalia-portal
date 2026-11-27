@@ -14,6 +14,8 @@ const registryState = vi.hoisted(() => ({ value: { status: 'ready', widgets: [] 
 const anclados = vi.hoisted(() => ({ value: [] as string[] }));
 
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => authState.value }));
+// El aviso de la invitación consulta hub-api por su cuenta; aquí no interesa.
+vi.mock('../components/AvisoCelebracion', () => ({ default: () => null }));
 vi.mock('../hooks/useWidgetRegistry', () => ({ useWidgetRegistry: () => registryState.value }));
 // El grid real (react-grid-layout) no aporta nada aquí: basta un botón por widget
 // que pida su eliminación, que es lo que abre el diálogo de confirmación.
