@@ -130,7 +130,7 @@ comando SQL completo que se le pasa al usuario:
 
 | Pieza | Qué hace |
 |---|---|
-| `src/lib/clientes.ts` (nuevo) | Puras: `nitBase`, `estadoCliente(hechos, hoy)`, `ETIQUETA_ESTADO_CLIENTE`, `filtrarPorCliente`. Tipos `HechosZoho` y `EstadoCliente`. |
+| `src/lib/clientes.ts` (nuevo) | Puras: `nitBase` (la misma regla que hub-api; las pruebas de las dos repiten los mismos casos), `estadoCliente(nit, cruce, hoy)`, `hechosDe`, `nitsParaConsultar`, `ETIQUETA_ESTADO_CLIENTE`, `filtrarPorCliente`. Tipos `HechosZoho`, `CruceZoho`, `EstadoCliente` y `EstadoCruce`. Comprobado el 2026-11-27: los 85 NIT de grasas y aceites del dataset traen guion, así que ninguno lleva el dígito de verificación pegado. |
 | `src/services/clientesZoho.ts` (nuevo) | `fetchClientesZoho(nits, signal?)`: un `POST` con `authHeaders` de `@suite/auth-client`, el mismo tope de tiempo que datos.gov.co, y devuelve un `Map` por NIT base. |
 | `src/lib/exportProspects.ts` | Cuatro columnas más: Cliente, Última factura, OCMA vendido, Últimos repuestos OCMA. |
 | `src/pages/Prospectos.tsx` | La consulta al abrir, la columna, el filtro y el aviso. |
