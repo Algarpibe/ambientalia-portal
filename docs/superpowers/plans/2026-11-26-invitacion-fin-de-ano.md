@@ -121,7 +121,7 @@ El diseño no dice nada en estos puntos. El plan sigue la opción marcada.
 | D6 | Cómo sabe la página quién soy y si soy admin. | `GET /api/celebracion` devuelve `yo` y `esAdmin`. El rol es el de la BD, que `requireAuth` ya leyó, así que no depende del JWT cacheado. |
 | D7 | Orden del muro y texto de mi tarjeta sin votos. | Mi tarjeta va **primera** (ahí está «Subir mi foto»), con «Aún nadie ha brindado por ti.». Con los votos cerrados, las tarjetas sin votos dicen «Sin brindis.». |
 | D8 | Desmarcar todas las cualidades de un compañero. | Se permite: guarda 0 votos (retira el brindis) y el botón vuelve a «Enviar brindis». |
-| D9 | Iniciales sin foto. | Sin partículas (de, del, la, las, los, y): primera letra de la 1.ª palabra y de la 2.ª, o de la 3.ª si hay 4 o más palabras («Yenny Marcela Noreña Vargas» → YN). |
+| D9 | Iniciales sin foto. | Sin partículas (de, del, la, las, los, y): primera letra de la 1.ª palabra y de la 2.ª, o de la 3.ª si hay 4 o más palabras («Ana María Ruiz Díaz» → AR). |
 | D10 | `xlsx` en el portal. | Se declara en `apps/portal/package.json`, con la misma URL de SheetJS que las demás apps. Hoy solo resuelve por estar elevado en la raíz. |
 | D11 | Mensaje si no va. | Se permite (una despedida); el pase solo sale si va. |
 | D12 | Tipografías. | Outfit y Inter por estilo en línea. Ya se cargan en `index.html`, pero el `body` del portal usa las del sistema. |
@@ -2262,7 +2262,7 @@ import { colorDe, iniciales, primerNombre } from './persona';
 describe('persona', () => {
   it('iniciales: 1.ª palabra y 2.ª (o 3.ª si hay cuatro o más), sin partículas', () => {
     expect(iniciales('Ana Ruiz')).toBe('AR');
-    expect(iniciales('YENNY MARCELA NOREÑA VARGAS')).toBe('YN');
+    expect(iniciales('ANA MARÍA RUIZ DÍAZ')).toBe('AR');
     expect(iniciales('maría de la paz gómez')).toBe('MP');
     expect(iniciales('Bruno')).toBe('B');
     expect(iniciales('   ')).toBe('?');

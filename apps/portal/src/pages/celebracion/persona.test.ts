@@ -5,7 +5,7 @@ import { colorDe, iniciales, primerNombre } from './persona';
 describe('persona', () => {
   it('iniciales: 1.ª palabra y 2.ª (o 3.ª si hay cuatro o más), sin partículas', () => {
     expect(iniciales('Ana Ruiz')).toBe('AR');
-    expect(iniciales('YENNY MARCELA NOREÑA VARGAS')).toBe('YN');
+    expect(iniciales('ANA MARÍA RUIZ DÍAZ')).toBe('AR');
     expect(iniciales('maría de la paz gómez')).toBe('MP');
     expect(iniciales('Bruno')).toBe('B');
     expect(iniciales('   ')).toBe('?');
