@@ -278,7 +278,8 @@ export default function CelebracionNavidad() {
               )
             )}
             {!bloqueada && <Confirmacion evento={evento} respuesta={vista.miRespuesta} onGuardar={confirmar} />}
-            {vista.miRespuesta?.asiste && (
+            {/* El pase, como el formulario, solo tras completar los pasos (también para quien respondió antes de las reglas). */}
+            {!bloqueada && vista.miRespuesta?.asiste && (
               <PaseDigital
                 nombre={vista.equipo.find((m) => m.userId === vista.yo)?.nombre ?? ''}
                 evento={evento}

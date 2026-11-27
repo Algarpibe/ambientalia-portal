@@ -142,7 +142,7 @@ describe('CelebracionNavidad', () => {
     expect(screen.getByRole('button', { name: /Completa los 2 pasos/ })).toBeTruthy();
   });
 
-  it('quien ya dijo «Sí voy» y queda bloqueado sigue viendo su pase', async () => {
+  it('quien ya dijo «Sí voy» pero le faltan pasos no ve el pase hasta completarlos', async () => {
     vi.mocked(cargarVista).mockResolvedValue(
       vistaDePrueba({
         brindis: { dados: 1, minimo: 12 },
@@ -150,7 +150,7 @@ describe('CelebracionNavidad', () => {
       }),
     );
     await abrir();
-    expect(screen.getByTestId('pase')).toBeTruthy();
+    expect(screen.queryByTestId('pase')).toBeNull();
     expect(screen.queryByRole('button', { name: /Sí voy/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Completa los 2 pasos/ })).toBeTruthy();
   });
