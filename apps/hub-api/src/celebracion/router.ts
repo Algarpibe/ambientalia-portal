@@ -6,10 +6,13 @@ import type { CelebracionService, Sesion } from './service.js';
 
 // Rutas de la invitación de fin de año, montadas bajo /api (ver index.ts).
 // Abiertas a cualquier usuario activo: basta requireAuth, sin app asignada.
-// El resumen y quitar o readmitir personas, además, exigen admin.
+// El resumen, las cualidades de todos y quitar o readmitir personas, además, exigen admin.
 
 /** Lo que el router necesita del servicio (los tests le pasan un stub). */
-export type CelebracionActions = Pick<CelebracionService, 'vista' | 'miEstado' | 'confirmar' | 'votar' | 'resumen' | 'excluir' | 'readmitir' | 'subirFoto'>;
+export type CelebracionActions = Pick<
+  CelebracionService,
+  'vista' | 'miEstado' | 'confirmar' | 'votar' | 'resumen' | 'excluir' | 'readmitir' | 'subirFoto' | 'cualidadesEquipo'
+>;
 
 function sesionDe(req: Request): Sesion | null {
   const p = getPayload(req);
@@ -78,6 +81,14 @@ export function createCelebracionRouter(service: CelebracionActions): Router {
   );
 
   router.get('/celebracion/resumen', requireAuth, requireAdmin, ruta('celebracion_resumen', () => service.resumen()));
+
+  // Las cualidades de todos, para la presentación del día del almuerzo: solo el admin (403 a los demás).
+  router.get(
+    '/celebracion/cualidades',
+    requireAuth,
+    requireAdmin,
+    ruta('celebracion_cualidades', () => service.cualidadesEquipo()),
+  );
 
   router.put(
     '/celebracion/excluidos/:userId',
