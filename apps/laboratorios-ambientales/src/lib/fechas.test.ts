@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { hoyLocal, sumarMeses } from './fechas';
+import { fechaDeHasta, hoyLocal, sumarMeses } from './fechas';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -37,5 +37,25 @@ describe('sumarMeses', () => {
 
   it('y el 29 de febrero en un año bisiesto', () => {
     expect(sumarMeses('2027-08-31', 6)).toBe('2028-02-29');
+  });
+});
+
+// Los casos que Prospectos prueba a través de groupProspects, ahora directos.
+describe('fechaDeHasta', () => {
+  it('saca la fecha AAAA-MM-DD del formato del dataset', () => {
+    expect(fechaDeHasta('2027-04-21T00:00:00.000')).toBe('2027-04-21');
+  });
+
+  it('«---» no es una fecha', () => {
+    expect(fechaDeHasta('---')).toBeNull();
+  });
+
+  it('recorta los espacios', () => {
+    expect(fechaDeHasta('  2027-04-21T00:00:00.000 ')).toBe('2027-04-21');
+  });
+
+  it('un formato raro o vacío no es una fecha', () => {
+    expect(fechaDeHasta('21/04/2027')).toBeNull();
+    expect(fechaDeHasta('')).toBeNull();
   });
 });

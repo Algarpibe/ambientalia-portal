@@ -41,6 +41,14 @@ const prospecto = (over: Partial<Prospecto> = {}): Prospecto => ({
 
 const cruce = (entradas: Record<string, HechosZoho>): CruceZoho => new Map(Object.entries(entradas));
 
+// Cualquier elemento con NIT: así las usa también la Base instalada de aire.
+type ConNit = { nit: string; serie: string };
+const equipos: ConNit[] = [
+  { nit: '900.000.003-1', serie: 'SN-0001' },
+  { nit: '900.000.003-1', serie: 'SN-0002' },
+  { nit: '', serie: 'SN-0003' },
+];
+
 describe('nitBase', () => {
   it('el formato del dataset da el NIT de Zoho', () => {
     expect(nitBase('900.000.001-7')).toBe('900000001');
@@ -128,6 +136,10 @@ describe('nitsParaConsultar', () => {
     ]);
     expect(nits).toEqual(['900000001']);
   });
+
+  it('acepta cualquier lista de elementos con nit', () => {
+    expect(nitsParaConsultar(equipos)).toEqual(['900000003']);
+  });
 });
 
 describe('filtrarPorCliente', () => {
@@ -145,6 +157,12 @@ describe('filtrarPorCliente', () => {
   it('con un estado deja solo los de ese estado', () => {
     expect(filtrarPorCliente(lista, 'activo', c, HOY).map((p) => p.nombre)).toEqual(['A']);
     expect(filtrarPorCliente(lista, 'sin-nit', c, HOY).map((p) => p.nombre)).toEqual(['B']);
+  });
+
+  it('acepta cualquier elemento con nit y devuelve el mismo tipo', () => {
+    const cruceEquipos = cruce({ '900000003': hechos({ ultimaFactura: '2026-10-01' }) });
+    const activos: ConNit[] = filtrarPorCliente(equipos, 'activo', cruceEquipos, HOY);
+    expect(activos.map((e) => e.serie)).toEqual(['SN-0001', 'SN-0002']);
   });
 });
 

@@ -3,12 +3,14 @@ import type { Laboratorio } from '../types';
 import { mapRecord } from '../services/api';
 import type { Prospecto } from './prospects';
 import {
+  clave,
   departamentosDe,
   esGrasasYAceites,
   esInfrarrojo,
   estadoVigencia,
   filterProspects,
   groupProspects,
+  nitCoincide,
   sortProspects,
 } from './prospects';
 
@@ -380,5 +382,29 @@ describe('departamentosDe', () => {
       prospecto({ departamento: 'Atlántico' }),
     ];
     expect(departamentosDe(lista)).toEqual(['Antioquia', 'Atlántico', 'Valle del Cauca']);
+  });
+});
+
+// clave y nitCoincide los usa también la búsqueda de la Base instalada de aire.
+describe('clave', () => {
+  it('quita tildes y mayúsculas y colapsa los espacios', () => {
+    expect(clave('  Estación   NÓRTE ')).toBe('estacion norte');
+  });
+});
+
+describe('nitCoincide', () => {
+  // `busqueda` llega ya pasada por clave, como en filterProspects.
+  it('encuentra el NIT con su formato', () => {
+    expect(nitCoincide('900.000.001-7', '900.000')).toBe(true);
+  });
+
+  it('y sin puntos ni guion', () => {
+    expect(nitCoincide('900.000.001-7', '900000001')).toBe(true);
+    expect(nitCoincide('900.000.001-7', '9000000017')).toBe(true);
+  });
+
+  it('las cifras dentro de un texto no son un NIT', () => {
+    expect(nitCoincide('900.000.001-7', 'ambiental 1')).toBe(false);
+    expect(nitCoincide('900.000.001-7', '900111')).toBe(false);
   });
 });
