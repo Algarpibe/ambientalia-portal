@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as XLSX from 'xlsx';
 import type { Prospecto } from './prospects';
+import type { CruceZoho } from './clientes';
 import { COLUMNAS_EXCEL, HOJA_EXCEL, filasExcel, nombreDeFichero } from './exportProspects';
 
 // Hoy + 6 meses = 2027-05-26.
@@ -24,7 +25,7 @@ const prospecto = (over: Partial<Prospecto> = {}): Prospecto => ({
 });
 
 describe('filasExcel', () => {
-  it('la primera fila es la cabecera, con las trece columnas en su orden', () => {
+  it('la primera fila es la cabecera, con las diecisiete columnas en su orden', () => {
     expect(filasExcel([], HOY)).toEqual([
       [
         'Laboratorio',
@@ -40,6 +41,10 @@ describe('filasExcel', () => {
         'Contacto',
         'Teléfono',
         'Correo',
+        'Cliente',
+        'Última factura',
+        'OCMA vendido',
+        'Últimos repuestos OCMA',
       ],
     ]);
   });
@@ -59,6 +64,10 @@ describe('filasExcel', () => {
       'Contacto Ficticio Uno',
       '6040000001',
       'lab.andino@example.com',
+      '',
+      '',
+      '',
+      '',
     ]);
   });
 
@@ -78,6 +87,24 @@ describe('filasExcel', () => {
     for (const fila of filasExcel([prospecto(), prospecto({ vigenciaMasProxima: null })], HOY)) {
       expect(fila).toHaveLength(COLUMNAS_EXCEL.length);
     }
+  });
+
+  it('con el cruce, las cuatro últimas columnas llevan el estado y las fechas', () => {
+    const cruce: CruceZoho = new Map([
+      ['900000001', { ultimaFactura: '2026-03-10', ocmaVendido: '2024-05-02', ultimosRepuestos: null }],
+    ]);
+    const fila = filasExcel([prospecto()], HOY, cruce)[1];
+    expect(fila.slice(-4)).toEqual(['Cliente activo', '2026-03-10', '2024-05-02', '']);
+  });
+
+  it('con el cruce, un laboratorio que no está en Zoho lo dice y deja las fechas vacías', () => {
+    const fila = filasExcel([prospecto()], HOY, new Map())[1];
+    expect(fila.slice(-4)).toEqual(['No está en Zoho', '', '', '']);
+  });
+
+  it('sin cruce (cargando o con error), las cuatro columnas van vacías', () => {
+    const fila = filasExcel([prospecto()], HOY, null)[1];
+    expect(fila.slice(-4)).toEqual(['', '', '', '']);
   });
 
   it('en la hoja, un texto que empieza por «=» es una celda de texto y no una fórmula', () => {
