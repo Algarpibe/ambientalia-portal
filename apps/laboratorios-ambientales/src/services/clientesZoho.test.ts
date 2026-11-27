@@ -70,9 +70,40 @@ describe('fetchClientesZoho', () => {
       ),
     );
     const promesa = fetchClientesZoho(['900000001'], undefined, CABECERAS);
+    let resuelta = false;
+    promesa.then(
+      () => {},
+      () => {
+        resuelta = true;
+      },
+    );
     const comprobacion = expect(promesa).rejects.toThrow(`hub-api no respondió en ${REQUEST_TIMEOUT_MS / 1000} s`);
-    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+    expect(resuelta).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await comprobacion;
+  });
+
+  it('tras una respuesta correcta no deja el temporizador del tope pendiente', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta({ clientes: [] })));
+    await fetchClientesZoho(['900000001'], undefined, CABECERAS);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('con la señal ya abortada, fetch recibe la señal abortada y falla como aborto, no como tope', async () => {
+    let senal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        senal = init.signal ?? undefined;
+        return Promise.reject(new DOMException('This operation was aborted', 'AbortError'));
+      }),
+    );
+    const controller = new AbortController();
+    controller.abort();
+    await expect(fetchClientesZoho(['900000001'], controller.signal, CABECERAS)).rejects.toThrow('aborted');
+    expect(senal?.aborted).toBe(true);
   });
 
   it('si quien llama aborta, la petición se aborta', async () => {

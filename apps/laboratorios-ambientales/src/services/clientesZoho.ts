@@ -12,6 +12,7 @@ type ClienteZoho = HechosZoho & { nit: string };
  * Pide a hub-api el cruce de estos NIT base. Sin NIT no llama. Con el mismo
  * tope de tiempo que datos.gov.co; `signal` permite cancelarla al cerrar la
  * vista. `cabeceras` solo se cambia en las pruebas.
+ * hub-api acepta como mucho 150 NIT (MAX_NITS en apps/hub-api/src/laboratorios/router.ts); hoy se envían unos 85. Si el dataset pasara de 150, habría que partir la petición.
  */
 export async function fetchClientesZoho(
   nits: string[],
