@@ -1,6 +1,14 @@
 // Catálogo de equipos de calidad del aire acreditados, portado del prototipo.
 // La clave es el código de designación (US EPA / UNE-EN) que aparece embebido en
 // el texto libre del campo «método» del dataset.
+//
+// Fuente de los códigos EPA: la «List of Designated Reference and Equivalent
+// Methods» de la EPA, emitida el 28 de julio de 2026:
+// https://www.epa.gov/system/files/documents/2026-07/amtic-list-july-2026_508-compliant.pdf
+// Marca, modelo y contaminante salen del texto de cada designación. Si un código
+// cubre varios fabricantes o modelos, van unidos con « / » («Ecotech / Acoem»),
+// también cuando una empresa cambió de nombre («Environnement S.A. / ENVEA»).
+// PM10, PM2.5 y PM10-2.5 son «Partículas», como en el catálogo original.
 export type Equipo = { brand: string; model: string; pollutant: string };
 export type EquipoIdentificado = Equipo & { code: string };
 
@@ -51,6 +59,87 @@ export const EQUIPMENT_MAP: Record<string, Equipo> = {
   'RFCA-0817-248': { brand: 'Sabio', model: '6050 CO Analyzer', pollutant: 'CO' },
   'EQPM-1013-209': { brand: 'Met One Instruments, Inc.', model: 'BAM-1022', pollutant: 'Partículas' },
   'EQPM-0715-266': { brand: 'Met One Instruments, Inc.', model: 'BAM-1022', pollutant: 'Partículas' },
+  // Añadidos el 2026-11-27: los 36 códigos que cita el dataset de aire y faltaban.
+  'EQOA-0193-091': {
+    brand: 'Teledyne Monitor Labs / Casella / Ecotech / Acoem / Aeris / Wedding & Associates',
+    model: 'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 / 1010 Series',
+    pollutant: 'O₃',
+  },
+  'EQOA-0206-148': { brand: 'Environnement S.A. / ENVEA', model: 'O3 42M', pollutant: 'O₃' },
+  'EQOA-0410-190': { brand: '2B Technologies', model: '202 / 205', pollutant: 'O₃' },
+  'EQOA-0515-225': { brand: 'Environnement S.A. / ENVEA', model: 'O3 42e', pollutant: 'O₃' },
+  'EQPM-0311-195': { brand: 'Grimm', model: 'EDM180', pollutant: 'Partículas' },
+  'EQPM-0325-269': { brand: 'Focused Photonics Inc.', model: 'BPM-200 PM2.5 Monitor', pollutant: 'Partículas' },
+  'EQPM-0404-151': { brand: 'Environnement S.A. / ENVEA', model: 'MP101M', pollutant: 'Partículas' },
+  'EQPM-0516-238': { brand: 'Teledyne API', model: 'T640 (640X)', pollutant: 'Partículas' },
+  'EQPM-0516-239': { brand: 'Teledyne API', model: 'T640 (640X)', pollutant: 'Partículas' },
+  'EQPM-0609-183': { brand: 'Thermo Scientific', model: '5014i / 5014iQ / 5028i / FH62C14-DHS', pollutant: 'Partículas' },
+  'EQPM-1013-211': { brand: 'Environnement S.A. / ENVEA', model: 'MP101M', pollutant: 'Partículas' },
+  'EQPM-1102-150': {
+    brand: 'Thermo Andersen / Thermo Scientific',
+    model: 'FH 62 C14 / 5014i / 5014iQ / 5028i',
+    pollutant: 'Partículas',
+  },
+  'EQPS-0311-197': { brand: 'Thermo Scientific', model: 'Partisol 2000-D / 2000i-D', pollutant: 'Partículas' },
+  'EQPS-0509-177': { brand: 'Thermo Scientific', model: 'Partisol 2000-D / 2000i-D', pollutant: 'Partículas' },
+  'EQSA-0193-092': {
+    brand: 'Teledyne Monitor Labs / Casella / Ecotech / Acoem / Aeris / Wedding & Associates',
+    model: 'ML9850 / CM2050 / EC9850 / EC9850T / AE9850 / AE2050 / 1040 Series',
+    pollutant: 'SO₂',
+  },
+  'EQSA-0802-149': { brand: 'Environnement S.A. / ENVEA', model: 'AF22M / AF22e', pollutant: 'SO₂' },
+  'RFCA-0206-147': { brand: 'Environnement S.A. / ENVEA', model: 'CO12M', pollutant: 'CO' },
+  'RFCA-0915-228': { brand: 'Environnement S.A. / ENVEA', model: 'CO12e', pollutant: 'CO' },
+  'RFNA-0118-249': { brand: 'Environnement S.A. / ENVEA', model: 'AC32e', pollutant: 'NOx' },
+  'RFNA-0202-146': { brand: 'Environnement S.A. / ENVEA', model: 'AC32M', pollutant: 'NOx' },
+  'RFNA-0418-250': { brand: 'Sabio', model: '6040 NOx Analyzer', pollutant: 'NOx' },
+  'RFPS-0202-141': {
+    brand: 'Tisch Environmental / New Star Environmental',
+    model: 'TE-6070 / NS-6070',
+    pollutant: 'Partículas',
+  },
+  'RFPS-0216-231': {
+    brand: 'Met One Instruments, Inc.',
+    model: 'E-FRM-PM10 / E-FRM-DC-PM10',
+    pollutant: 'Partículas',
+  },
+  'RFPS-0315-221': {
+    brand: 'Met One Instruments, Inc.',
+    model: 'E-FRM-PM2.5 / E-FRM-DC-PM2.5',
+    pollutant: 'Partículas',
+  },
+  'RFPS-0498-116': { brand: 'BGI Inc. / Mesa Laboratories Inc.', model: 'PQ200 / PQ200A', pollutant: 'Partículas' },
+  'RFPS-0498-117': {
+    brand: 'Thermo Scientific / Rupprecht & Patashnick',
+    model: 'Partisol 2000-FRM / 2000i PM2.5',
+    pollutant: 'Partículas',
+  },
+  'RFPS-0498-118': {
+    brand: 'Thermo Scientific / Rupprecht & Patashnick',
+    model: 'Partisol-Plus 2025 / 2025i PM2.5',
+    pollutant: 'Partículas',
+  },
+  'RFPS-0694-098': { brand: 'Thermo Scientific / Rupprecht & Patashnick', model: 'Partisol 2000', pollutant: 'Partículas' },
+  'RFPS-0714-216': { brand: 'Tisch Environmental', model: 'TE-Wilbur10', pollutant: 'Partículas' },
+  'RFPS-1014-219': { brand: 'Tisch Environmental', model: 'TE-Wilbur2.5', pollutant: 'Partículas' },
+  'RFPS-1087-062': { brand: 'Wedding & Associates / Thermo Environmental', model: '600', pollutant: 'Partículas' },
+  'RFPS-1287-063': {
+    brand: 'Graseby Andersen / Sierra-Andersen / General Metal Works',
+    model: '1200',
+    pollutant: 'Partículas',
+  },
+  'RFPS-1298-124': { brand: 'BGI Inc. / Mesa Laboratories Inc.', model: 'PQ100', pollutant: 'Partículas' },
+  'RFPS-1298-125': { brand: 'BGI Inc. / Mesa Laboratories Inc.', model: 'PQ200', pollutant: 'Partículas' },
+  'RFPS-1298-126': {
+    brand: 'Thermo Scientific / Rupprecht & Patashnick',
+    model: 'Partisol 2000-FRM / 2000i PM10',
+    pollutant: 'Partículas',
+  },
+  'RFPS-1298-127': {
+    brand: 'Thermo Scientific / Rupprecht & Patashnick',
+    model: 'Partisol-Plus 2025 / 2025i PM10',
+    pollutant: 'Partículas',
+  },
 };
 
 // De más largo a más corto: evita que un código que es prefijo de otro gane el
