@@ -52,6 +52,7 @@
 | 5 | `EstadoCruce` (`cargando`, `listo`, `error`). | Vive en `src/lib/clientes.ts`, no en el componente: `react-refresh` pide que los ficheros de componentes solo exporten componentes. |
 | 6 | Fechas de la réplica. | Salen con `to_char(…, 'YYYY-MM-DD')`, valga `date` o `timestamp` la columna. |
 | 7 | El aviso ámbar «Qué dice y qué no dice esta vista». | Se añade una frase: «OCMA vendido» solo cuenta lo que facturó Ambientalia. |
+| 9 | Barrido de NIT a ciegas (encontrado en la revisión de la Tarea 2, 2026-11-27). | El usuario eligió la opción A: límite por usuario de 5 peticiones por minuto detrás de `requireApp`, `MAX_NITS` = 150, la validación dentro del `try` y el texto honesto. El código de la Tarea 2 de abajo es el original; lo que está en la rama es el del commit `fix(hub-api): límite por usuario…`. |
 | 8 | Tipo de contacto. | `c.raw ->> 'contact_type' = 'customer'`. **Depende de la verificación previa:** si `books.contacts` no tiene `raw`, el orquestador cambia esa línea antes de la Tarea 1 (ver «Paso previo»). |
 
 ## Paso previo (orquestador, con el usuario): verificación contra la réplica
@@ -1885,8 +1886,12 @@ más: ni importes, ni nombres, ni identificadores.
   columna vacía, el filtro «Cliente» desactivado y el Excel sin el cruce.
 - **El Excel** lleva cuatro columnas más al final: Cliente, Última factura,
   OCMA vendido y Últimos repuestos OCMA.
-- hub-api cachea el cruce completo 2 minutos, pero solo devuelve los NIT
-  pedidos: desde esta app no se puede sacar la lista de clientes.
+- hub-api cachea el cruce completo 2 minutos y solo devuelve los NIT pedidos.
+  El servidor no sabe cuáles son prospectos, así que frena el barrido por
+  volumen: como mucho 150 NIT por petición y 5 peticiones por minuto y usuario
+  (después, 429). Hoy la vista envía unos 85; si el dataset pasara de 150
+  laboratorios de grasas y aceites, la petición daría 400 y habría que
+  partirla.
 ```
 
 Sustituye:
@@ -1923,7 +1928,10 @@ por:
   tres fechas: la de la última factura, la del último OCMA vendido y la de los
   últimos repuestos de OCMA. No salen nombres, importes ni identificadores. El
   cruce completo (NIT → fechas) se guarda en memoria 2 minutos (`cached`), pero
-  la respuesta lleva solo los NIT pedidos.
+  la respuesta lleva solo los NIT pedidos. El servidor no comprueba que sean
+  del dataset: un usuario con la app podría probar NIT a ciegas. Se frena por
+  volumen (150 NIT por petición, 5 peticiones por minuto y usuario: unos 750
+  NIT por minuto como mucho), no se impide.
 ```
 
 Sustituye:

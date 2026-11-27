@@ -87,8 +87,11 @@ entra siempre). Es la regla de `requireApp`.
 `requireApp('laboratorios-ambientales')`.
 
 - Cuerpo: `{ "nits": string[] }`.
-- 400 si `nits` no es una lista, si trae más de 500 elementos o si alguno no
+- 400 si `nits` no es una lista, si trae más de 150 elementos o si alguno no
   da un NIT base de 6 a 10 dígitos.
+- 429 a partir de la sexta petición en un minuto del mismo usuario (límite
+  propio de la ruta, por usuario; el global de `/api/` es por IP). Va detrás de
+  `requireApp`: un 401 o un 403 no gasta cupo.
 - 200: `{ "clientes": [{ "nit", "ultimaFactura", "ocmaVendido", "ultimosRepuestos" }] }`
   con solo los NIT pedidos que están en Zoho. Cada objeto lleva exactamente esos
   cuatro campos.
@@ -102,8 +105,16 @@ fecha más reciente de cada tipo. Las categorías van como parámetros (`$1`, `$
 
 **Caché.** El resultado completo de `agruparPorNit` se guarda con `cached`
 (clave `laboratorios:clientes`, 2 minutos). Cada respuesta filtra ese mapa con
-los NIT pedidos. Nadie puede sacar la lista completa de clientes: solo el cruce
-de los NIT que envía, y la app solo envía los del dataset público.
+los NIT pedidos.
+
+**Barrido.** El servidor no sabe qué NIT son prospectos: la app envía solo los
+del dataset público, pero alguien con la app podría enviar NIT inventados o de
+un registro público y saber cuáles son clientes. No se impide; se frena por
+volumen: 150 NIT por petición y 5 peticiones por minuto y usuario dejan el
+barrido en unos 750 NIT por minuto (antes, con 500 NIT y solo el límite global
+de 60 por IP, eran unos 30 000). Decidido con el usuario el 2026-11-27 (opción
+A de la revisión de la Tarea 2); validar los NIT contra el dataset del IDEAM
+desde hub-api se descartó por la dependencia de datos.gov.co.
 
 **Verificación contra la réplica**, antes de dar la pieza por buena, con un
 comando SQL completo que se le pasa al usuario:

@@ -205,8 +205,10 @@ describe('POST /api/laboratorios/clientes — límite por usuario', () => {
   });
 
   it('un 403 no gasta cupo', async () => {
+    // El MISMO usuario, primero sin la app y luego con ella: si el límite fuera
+    // antes de requireApp, sus seis 403 le habrían gastado el cupo.
     const app = appCon(poolFalso());
-    const sinApp = `Bearer ${token(['contabilidad'], 'reader', OTRO_USER_ID)}`;
+    const sinApp = `Bearer ${token(['contabilidad'])}`;
     for (let i = 0; i < 6; i++) {
       const res = await request(app).post(RUTA).set('Authorization', sinApp).send({ nits: ['900000001'] });
       expect(res.status).toBe(403);
