@@ -252,11 +252,38 @@ Link para el WhatsApp, confirmado por el usuario:
 `https://portal.ambientalia.cloud/celebracion-navidad-2026`. Hay que enviarlo
 después de desplegar: antes, la ruta no existe y el portal manda al Inicio.
 
+## Ampliación: quitar personas de la invitación (2026-11-27)
+
+Tras el despliegue apareció en el panel una usuaria activa que no está invitada
+y que debe conservar su acceso al portal. Desactivarla no sirve, así que el admin
+puede quitar a cualquier usuario activo de la invitación y volver a invitarlo.
+
+- **BD:** migración 082, tabla `portal.celebracion_excluidos (evento, user_id)`,
+  con `ON DELETE CASCADE`. `portal_app` puede leer, insertar y borrar, pero no
+  modificar.
+- **Quien no está invitado:**
+  - desaparece del muro y del resumen, y sus votos no cuentan;
+  - no ve el aviso del Inicio (`mi-estado` trae `invitado`);
+  - si abre el link, `GET /api/celebracion` responde 403 `no_invitado` y la
+    página dice «Esta invitación no está disponible para tu cuenta»;
+  - no puede confirmar ni votar (403 `no_invitado`);
+  - votarle a él da 400 `usuario_no_valido`.
+- **Sus datos no se borran:** respuestas y votos se quedan en la BD. Si se le
+  vuelve a invitar, reaparecen.
+- **Admin:**
+  - `PUT /api/celebracion/excluidos/:userId` quita a alguien de la invitación y
+    `DELETE` lo vuelve a invitar.
+  - El resumen trae la lista `excluidos`.
+  - En el panel, cada fila tiene «Quitar» y hay una sección «No invitados» con
+    «Volver a invitar».
+  - Es reversible, así que no se pide confirmación.
+  - El admin no puede quitarse a sí mismo (400 `exclusion_propia`); si pudiera,
+    perdería el panel.
+
 ## Fuera de alcance
 
 - Un módulo genérico de eventos con pantalla para crearlos. Para otro evento se
   cambia la configuración del módulo y el identificador.
-- Ocultar cuentas concretas del muro. Si hay cuentas de prueba, se desactivan.
 - Que el admin suba fotos ajenas.
 - Acompañantes (+1).
 - Recordatorios automáticos por correo o WhatsApp a quien no ha respondido.
