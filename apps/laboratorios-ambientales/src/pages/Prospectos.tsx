@@ -13,8 +13,14 @@ import {
 } from '../lib/prospects';
 import { HOJA_EXCEL, filasExcel, nombreDeFichero } from '../lib/exportProspects';
 import { hoyLocal } from '../lib/fechas';
-import type { CruceZoho, EstadoCliente, EstadoCruce } from '../lib/clientes';
-import { ESTADOS_CLIENTE, ETIQUETA_ESTADO_CLIENTE, filtrarPorCliente, nitsParaConsultar } from '../lib/clientes';
+import type { EstadoCliente, ResultadoCruce } from '../lib/clientes';
+import {
+  ESTADOS_CLIENTE,
+  ETIQUETA_ESTADO_CLIENTE,
+  estadoDelCruce,
+  filtrarPorCliente,
+  nitsParaConsultar,
+} from '../lib/clientes';
 import { fetchClientesZoho } from '../services/clientesZoho';
 import CeldaCliente from '../components/CeldaCliente';
 
@@ -44,8 +50,7 @@ export default function Prospectos({ data, onBack }: Props) {
   const [exportando, setExportando] = useState(false);
   const [errorExportar, setErrorExportar] = useState('');
   const [filtroCliente, setFiltroCliente] = useState<EstadoCliente | ''>('');
-  const [cruce, setCruce] = useState<CruceZoho | null>(null);
-  const [estadoCruce, setEstadoCruce] = useState<EstadoCruce>('cargando');
+  const [resultado, setResultado] = useState<ResultadoCruce | null>(null);
   // Subirlo repite la consulta: es lo que hace «Reintentar».
   const [intento, setIntento] = useState(0);
 
@@ -58,30 +63,31 @@ export default function Prospectos({ data, onBack }: Props) {
   // Una sola consulta con los NIT de las dos pestañas. La dependencia es el texto
   // y no la lista: si los datos se refrescan con los mismos NIT, no se repite.
   const claveNits = useMemo(() => nitsParaConsultar(todos).join(','), [todos]);
+  // Cada resultado lleva la clave de su consulta: si cambian los NIT o se
+  // reintenta, el viejo deja de valer y la vista vuelve a «Consultando…».
+  const clave = `${claveNits}#${intento}`;
   useEffect(() => {
     const controller = new AbortController();
+    const deEstaConsulta = `${claveNits}#${intento}`;
     fetchClientesZoho(claveNits === '' ? [] : claveNits.split(','), controller.signal).then(
-      (resultado) => {
-        setCruce(resultado);
-        setEstadoCruce('listo');
+      (cruce) => {
+        if (!controller.signal.aborted) setResultado({ clave: deEstaConsulta, cruce });
       },
       (error: unknown) => {
         // Al cerrar la vista se aborta: eso no es un error que haya que enseñar.
         if (controller.signal.aborted) return;
         console.warn('No se pudo consultar Zoho', error);
-        setEstadoCruce('error');
+        setResultado({ clave: deEstaConsulta, cruce: null });
       },
     );
     return () => controller.abort();
   }, [claveNits, intento]);
 
-  const reintentar = () => {
-    setEstadoCruce('cargando');
-    setIntento((n) => n + 1);
-  };
+  const estadoCruce = estadoDelCruce(resultado, clave);
+  const reintentar = () => setIntento((n) => n + 1);
 
   // Mientras no hay cruce, el filtro «Cliente» no cuenta y el Excel sale sin él.
-  const cruceListo = estadoCruce === 'listo' ? cruce : null;
+  const cruceListo = estadoCruce === 'listo' ? (resultado?.cruce ?? null) : null;
   const clienteElegido = cruceListo === null ? '' : filtroCliente;
 
   // El número de cada pestaña cuenta su grupo con los demás filtros aplicados.
@@ -235,7 +241,7 @@ export default function Prospectos({ data, onBack }: Props) {
             </label>
             <select
               id="cliente-prospectos"
-              value={filtroCliente}
+              value={clienteElegido}
               onChange={(e) => setFiltroCliente(e.target.value as EstadoCliente | '')}
               disabled={estadoCruce !== 'listo'}
               className={`${SELECT_CLASS} disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed`}
@@ -338,7 +344,7 @@ export default function Prospectos({ data, onBack }: Props) {
                         </p>
                       </td>
                       <td className="px-3 py-2">
-                        <CeldaCliente nit={prospecto.nit} cruce={cruce} estadoCruce={estadoCruce} hoy={hoy} />
+                        <CeldaCliente nit={prospecto.nit} cruce={cruceListo} estadoCruce={estadoCruce} hoy={hoy} />
                       </td>
                       <td className="px-3 py-2 text-slate-600">{prospecto.ciudad || '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{prospecto.departamento || '—'}</td>

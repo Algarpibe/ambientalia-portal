@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { Prospecto } from './prospects';
-import type { CruceZoho, HechosZoho } from './clientes';
+import type { CruceZoho, HechosZoho, ResultadoCruce } from './clientes';
 import {
   ESTADOS_CLIENTE,
   ETIQUETA_ESTADO_CLIENTE,
   estadoCliente,
+  estadoDelCruce,
   filtrarPorCliente,
   hechosDe,
   nitBase,
@@ -144,6 +145,28 @@ describe('filtrarPorCliente', () => {
   it('con un estado deja solo los de ese estado', () => {
     expect(filtrarPorCliente(lista, 'activo', c, HOY).map((p) => p.nombre)).toEqual(['A']);
     expect(filtrarPorCliente(lista, 'sin-nit', c, HOY).map((p) => p.nombre)).toEqual(['B']);
+  });
+});
+
+describe('estadoDelCruce', () => {
+  const c = cruce({ '900000001': hechos({ ultimaFactura: '2026-10-01' }) });
+  const resultado = (clave: string, cruceDe: CruceZoho | null): ResultadoCruce => ({ clave, cruce: cruceDe });
+
+  it('sin resultado todavía, consultando', () => {
+    expect(estadoDelCruce(null, 'a#0')).toBe('cargando');
+  });
+
+  it('con el cruce de la clave vigente, listo', () => {
+    expect(estadoDelCruce(resultado('a#0', c), 'a#0')).toBe('listo');
+  });
+
+  it('con el fallo de la clave vigente, error', () => {
+    expect(estadoDelCruce(resultado('a#0', null), 'a#0')).toBe('error');
+  });
+
+  it('un resultado de otra clave (otros NIT o un reintento) no vale: consultando', () => {
+    expect(estadoDelCruce(resultado('a#0', c), 'b#0')).toBe('cargando');
+    expect(estadoDelCruce(resultado('a#0', null), 'a#1')).toBe('cargando');
   });
 });
 

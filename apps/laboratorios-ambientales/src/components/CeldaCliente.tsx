@@ -14,7 +14,7 @@ const INSIGNIA_CLIENTE: Record<EstadoCliente, string> = {
   antiguo: 'bg-amber-100 text-amber-800',
   'sin-compras': 'bg-sky-100 text-sky-800',
   'no-en-zoho': 'bg-slate-100 text-slate-700',
-  'sin-nit': 'bg-slate-100 text-slate-500',
+  'sin-nit': 'bg-slate-100 text-slate-600',
 };
 
 export default function CeldaCliente({ nit, cruce, estadoCruce, hoy }: Props) {

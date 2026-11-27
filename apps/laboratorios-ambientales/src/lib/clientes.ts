@@ -19,6 +19,19 @@ export type CruceZoho = ReadonlyMap<string, HechosZoho>;
 /** Cómo va la consulta a hub-api. */
 export type EstadoCruce = 'cargando' | 'listo' | 'error';
 
+/** Lo que llegó de hub-api para una consulta concreta: el cruce, o null si falló. */
+export type ResultadoCruce = { clave: string; cruce: CruceZoho | null };
+
+/**
+ * El estado de la consulta vigente. Un resultado de otra clave (otros NIT tras
+ * un refresco, o un reintento) no vale: la vista vuelve a «cargando» y nunca
+ * enseña un cruce viejo como si fuera el de ahora.
+ */
+export function estadoDelCruce(resultado: ResultadoCruce | null, clave: string): EstadoCruce {
+  if (resultado === null || resultado.clave !== clave) return 'cargando';
+  return resultado.cruce === null ? 'error' : 'listo';
+}
+
 // Sin facturarle en este tiempo, el cliente pasa de activo a antiguo.
 export const MESES_CLIENTE_ACTIVO = 36;
 
