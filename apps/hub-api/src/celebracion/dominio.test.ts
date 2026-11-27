@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { CUALIDADES, EVENTO } from './config.js';
+import { CUALIDADES, EVENTO, FOTO_MAX } from './config.js';
 import {
   CelebracionError,
   confirmacionesAbiertas,
   esUuid,
   parseConfirmacion,
   parseCualidades,
+  parseFoto,
   top3,
   votosAbiertos,
 } from './dominio.js';
@@ -49,6 +50,36 @@ describe('CelebracionError', () => {
     expect(new CelebracionError('no_invitado').status).toBe(403);
     expect(new CelebracionError('exclusion_propia').status).toBe(400);
     expect(new CelebracionError('voto_propio').status).toBe(400);
+    expect(new CelebracionError('falta_foto').status).toBe(409);
+    expect(new CelebracionError('foto_invalida').status).toBe(400);
+  });
+});
+
+describe('parseFoto', () => {
+  it('acepta un data URL de jpeg, png o webp en base64', () => {
+    expect(parseFoto({ foto: 'data:image/jpeg;base64,AAAA' })).toBe('data:image/jpeg;base64,AAAA');
+    expect(parseFoto({ foto: 'data:image/png;base64,iVBOR+/w==' })).toBe('data:image/png;base64,iVBOR+/w==');
+    expect(parseFoto({ foto: 'data:image/webp;base64,AAAA=' })).toBe('data:image/webp;base64,AAAA=');
+  });
+
+  it('rechaza lo que no es una imagen en data URL', () => {
+    expect(resultado(() => parseFoto(null))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({}))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 42 }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'https://ejemplo.test/a.jpg' }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'data:image/svg+xml;base64,AAAA' }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'data:image/gif;base64,AAAA' }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'data:image/jpeg;base64,' }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'data:image/jpeg;base64,AA AA' }))).toBe('400:foto_invalida');
+    expect(resultado(() => parseFoto({ foto: 'data:image/jpeg;base64,<script>' }))).toBe('400:foto_invalida');
+  });
+
+  it('el tope es FOTO_MAX caracteres, contando el encabezado', () => {
+    const encabezado = 'data:image/jpeg;base64,';
+    expect(parseFoto({ foto: encabezado + 'A'.repeat(FOTO_MAX - encabezado.length) })).toHaveLength(FOTO_MAX);
+    expect(resultado(() => parseFoto({ foto: encabezado + 'A'.repeat(FOTO_MAX - encabezado.length + 1) }))).toBe(
+      '400:foto_invalida',
+    );
   });
 });
 

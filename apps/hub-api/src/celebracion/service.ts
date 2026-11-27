@@ -5,6 +5,7 @@ import {
   esUuid,
   parseConfirmacion,
   parseCualidades,
+  parseFoto,
   top3,
   votosAbiertos,
   type CualidadVotada,
@@ -50,6 +51,10 @@ export interface CelebracionStore {
   confirmacionDe(evento: string, userId: string): Promise<Confirmacion | null>;
   /** Todas las del evento, también las de cuentas inactivas (el servicio las filtra). */
   listarConfirmaciones(evento: string): Promise<Confirmacion[]>;
+  /** Fotos graciosas del evento (data URL), una por persona que la subió. */
+  listarFotos(evento: string): Promise<{ userId: string; foto: string }[]>;
+  /** Crea o reemplaza la foto graciosa de la persona. */
+  guardarFoto(evento: string, userId: string, foto: string, ahora: Date): Promise<void>;
   /** Crea o reemplaza la respuesta de la persona. */
   guardarConfirmacion(evento: string, userId: string, datos: DatosConfirmacion, ahora: Date): Promise<void>;
   /** En una transacción: borra los votos de votante a votado y guarda los nuevos. */
@@ -63,6 +68,8 @@ export interface Sesion {
 
 export interface MiembroVista extends Miembro {
   cualidades: CualidadVotada[];
+  /** Su foto graciosa del evento (distinta del avatar del perfil), o null si aún no la sube. */
+  foto: string | null;
 }
 
 export interface Vista {
@@ -139,12 +146,14 @@ export class CelebracionService {
 
   async vista(sesion: Sesion): Promise<Vista> {
     const ahora = this.now();
-    const [{ equipo, excluidos }, conteos, mios, confirmacion] = await Promise.all([
+    const [{ equipo, excluidos }, conteos, mios, confirmacion, fotos] = await Promise.all([
       this.invitados(),
       this.store.contarVotos(EVENTO.id),
       this.store.votosDe(EVENTO.id, sesion.userId),
       this.store.confirmacionDe(EVENTO.id, sesion.userId),
+      this.store.listarFotos(EVENTO.id),
     ]);
+    const fotoDe = new Map(fotos.map((f) => [f.userId.toLowerCase(), f.foto] as const));
     if (excluidos.has(sesion.userId.toLowerCase())) throw new CelebracionError('no_invitado');
 
     const porVotado = new Map<string, CualidadVotada[]>();
@@ -172,7 +181,11 @@ export class CelebracionService {
       },
       yo: sesion.userId,
       esAdmin: sesion.esAdmin,
-      equipo: equipo.map((m) => ({ ...m, cualidades: top3(porVotado.get(m.userId) ?? []) })),
+      equipo: equipo.map((m) => ({
+        ...m,
+        cualidades: top3(porVotado.get(m.userId) ?? []),
+        foto: fotoDe.get(m.userId.toLowerCase()) ?? null,
+      })),
       miRespuesta: confirmacion
         ? {
             asiste: confirmacion.asiste,
@@ -206,10 +219,21 @@ export class CelebracionService {
     const ahora = this.now();
     if (this.esta(await this.store.listarExcluidos(EVENTO.id), userId)) throw new CelebracionError('no_invitado');
     if (!confirmacionesAbiertas(ahora)) throw new CelebracionError('confirmaciones_cerradas');
-    const [{ equipo }, mios] = await Promise.all([this.invitados(), this.store.votosDe(EVENTO.id, userId)]);
+    const [{ equipo }, mios, fotos] = await Promise.all([
+      this.invitados(),
+      this.store.votosDe(EVENTO.id, userId),
+      this.store.listarFotos(EVENTO.id),
+    ]);
+    if (!fotos.some((f) => f.userId.toLowerCase() === userId.toLowerCase())) throw new CelebracionError('falta_foto');
     const { dados, minimo } = this.brindis(equipo, mios, userId);
     if (dados < minimo) throw new CelebracionError('faltan_brindis');
     await this.store.guardarConfirmacion(EVENTO.id, userId, parseConfirmacion(body), ahora);
+  }
+
+  /** Guarda (o reemplaza) la foto graciosa del evento; no toca la foto de perfil. */
+  async subirFoto(userId: string, body: unknown): Promise<void> {
+    if (this.esta(await this.store.listarExcluidos(EVENTO.id), userId)) throw new CelebracionError('no_invitado');
+    await this.store.guardarFoto(EVENTO.id, userId, parseFoto(body), this.now());
   }
 
   /**

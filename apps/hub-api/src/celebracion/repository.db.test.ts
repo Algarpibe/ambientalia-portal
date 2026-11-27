@@ -158,6 +158,21 @@ describe('CelebracionRepository', () => {
     expect(await repo.listarExcluidos(EVENTO)).toEqual([]);
   });
 
+  it('guardarFoto crea y luego reemplaza la foto; listarFotos la ve por evento', async () => {
+    const ana = await usuario('Ana Ruiz');
+    await repo.guardarFoto(EVENTO, ana, 'data:image/jpeg;base64,AAAA', AHORA);
+    await repo.guardarFoto(EVENTO, ana, 'data:image/png;base64,BBBB', new Date('2026-12-02T15:00:00Z'));
+    expect(await repo.listarFotos(EVENTO)).toEqual([{ userId: ana, foto: 'data:image/png;base64,BBBB' }]);
+    expect(await repo.listarFotos('otro-evento')).toEqual([]);
+  });
+
+  it('borrar la cuenta borra su foto', async () => {
+    const ana = await usuario('Ana Ruiz');
+    await repo.guardarFoto(EVENTO, ana, 'data:image/jpeg;base64,AAAA', AHORA);
+    await db.query('DELETE FROM portal.users WHERE id = $1', [ana]);
+    expect(await repo.listarFotos(EVENTO)).toEqual([]);
+  });
+
   // Los permisos de portal_app sobre las tablas de la 081 se comprueban solo en
   // db.roles.db.test.ts: aquí el rol no existe al migrar y no se darían.
 });

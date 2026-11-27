@@ -220,6 +220,14 @@ describe('el rol de las peticiones (portal_app)', () => {
     expect(rows[0]).toEqual({ retira: true, edita: false });
   });
 
+  it('portal_app sube y reemplaza fotos graciosas pero no las borra (083)', async () => {
+    const { rows } = await migrador.query(
+      `SELECT has_table_privilege('portal_app', 'portal.celebracion_fotos', 'UPDATE') AS reemplaza,
+              has_table_privilege('portal_app', 'portal.celebracion_fotos', 'DELETE') AS borra`,
+    );
+    expect(rows[0]).toEqual({ reemplaza: true, borra: false });
+  });
+
   it('dar los permisos en cada arranque no espera a las peticiones que están en curso', async () => {
     // La 068 corre en CADA arranque, y en un despliegue el contenedor viejo sigue
     // atendiendo mientras arranca el nuevo (DATA-340). Si el GRANT esperara a una

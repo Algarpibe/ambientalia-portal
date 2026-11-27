@@ -55,5 +55,8 @@ export const PREFERENCIAS: readonly Preferencia[] = [
 /** Cualidades que cada persona puede votar a cada compañero. */
 export const MAX_CUALIDADES = 3;
 
+/** Largo máximo (en caracteres, con el encabezado data:) de la foto graciosa. */
+export const FOTO_MAX = 300_000;
+
 /** Largo máximo del mensaje de la confirmación (la BD tiene el mismo CHECK). */
 export const MENSAJE_MAX = 200;

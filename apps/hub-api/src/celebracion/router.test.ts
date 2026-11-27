@@ -46,6 +46,7 @@ function stub(parcial: Partial<CelebracionActions> = {}): CelebracionActions {
     votar: vi.fn(async () => {}),
     excluir: vi.fn(async () => {}),
     readmitir: vi.fn(async () => {}),
+    subirFoto: vi.fn(async () => {}),
     resumen: vi.fn(async () => ({ hola: 'resumen' }) as never),
     ...parcial,
   };
@@ -95,6 +96,28 @@ describe('router de la invitación', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'confirmacion_guardada' });
     expect(service.confirmar).toHaveBeenCalledWith(ANA, { asiste: true, preferencia: 'general' });
+  });
+
+  it('PUT /celebracion/mi-foto pasa quién soy y el cuerpo, y foto_invalida es 400', async () => {
+    const service = stub();
+    const res = await request(montar(service))
+      .put('/api/celebracion/mi-foto')
+      .set(cabecera(ANA))
+      .send({ foto: 'data:image/jpeg;base64,AAAA' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'foto_guardada' });
+    expect(service.subirFoto).toHaveBeenCalledWith(ANA, { foto: 'data:image/jpeg;base64,AAAA' });
+
+    const mala = stub({
+      subirFoto: vi.fn(async () => {
+        throw new CelebracionError('foto_invalida');
+      }),
+    });
+    const rechazo = await request(montar(mala)).put('/api/celebracion/mi-foto').set(cabecera(ANA)).send({ foto: 'x' });
+    expect(rechazo.status).toBe(400);
+    expect(rechazo.body).toEqual({ error: 'foto_invalida' });
+    const sinSesion = await request(montar(service)).put('/api/celebracion/mi-foto').send({});
+    expect(sinSesion.status).toBe(401);
   });
 
   it('PUT /celebracion/votos/:userId pasa votante, votado y cuerpo', async () => {
