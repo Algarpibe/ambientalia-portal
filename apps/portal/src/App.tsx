@@ -19,6 +19,7 @@ import RestablecerContrasena from './pages/RestablecerContrasena';
 import Terminos from './pages/Terminos';
 import Configuracion from './pages/Configuracion';
 import AdminUsers from './pages/admin/AdminUsers';
+import { RUTA_CELEBRACION } from './pages/celebracion/ruta';
 
 // Lazy load apps
 const ConciliadorPagos = lazyConReintento(() => import('../../payment-reconciliation/src/App'));
@@ -33,6 +34,7 @@ const Ausencias = lazyConReintento(() => import('../../ausencias/src/App'));
 const Calibraciones = lazyConReintento(() => import('../../calibraciones/src/App'));
 const TrazabilidadMantenimientos = lazyConReintento(() => import('../../trazabilidad-mantenimientos/src/App'));
 const EquiposTaller = lazyConReintento(() => import('../../equipos-taller/src/App'));
+const CelebracionNavidad = lazyConReintento(() => import('./pages/celebracion/CelebracionNavidad'));
 
 function LoadingFallback() {
   return (
@@ -70,6 +72,18 @@ function App() {
 
         {/* «Mis equipos» (móvil, solo lectura) — fuera del shell */}
         <Route path="/equipos-taller/mis-equipos" element={<RutaMisEquipos />} />
+
+        {/* Invitación al almuerzo de fin de año — fuera del shell; con sesión pero sin app asignada */}
+        <Route
+          path={RUTA_CELEBRACION}
+          element={
+            <RequireAuth>
+              <Suspense fallback={<LoadingFallback />}>
+                <CelebracionNavidad />
+              </Suspense>
+            </RequireAuth>
+          }
+        />
 
         {/* Main app with sidebar */}
         <Route
