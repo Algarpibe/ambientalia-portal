@@ -1,8 +1,9 @@
 import { useState, type ChangeEvent } from 'react';
 import { notify } from '../../lib/notify';
+import AvatarPersona from './AvatarPersona';
 import { BOTON } from './estilos';
-import { ESPECTRO, FUENTE_TITULOS } from './marca';
-import { colorDe, iniciales, primerNombre } from './persona';
+import { FUENTE_TITULOS } from './marca';
+import { primerNombre } from './persona';
 import type { Miembro } from './tipos';
 
 interface Props {
@@ -10,31 +11,14 @@ interface Props {
   yo: string;
   misVotos: Record<string, string[]>;
   votosAbiertos: boolean;
+  /** Quien no es admin no recibe las cualidades: la tarjeta dice que se desvelan el día del almuerzo. */
+  cualidadesOcultas: boolean;
   onBrindis: (miembro: Miembro) => void;
   onSubirFoto: (archivo: File) => Promise<void>;
 }
 
-function Avatar({ miembro }: { miembro: Miembro }) {
-  const imagen = miembro.foto ?? miembro.avatar;
-  return (
-    <div className="mx-auto mb-3 h-[74px] w-[74px] rounded-full p-[3px]" style={{ background: ESPECTRO }}>
-      {imagen ? (
-        <img src={imagen} alt="" className="h-full w-full rounded-full bg-white object-cover" />
-      ) : (
-        <div
-          aria-hidden="true"
-          className="flex h-full w-full items-center justify-center rounded-full text-xl font-black text-white"
-          style={{ background: colorDe(miembro.userId), fontFamily: FUENTE_TITULOS }}
-        >
-          {iniciales(miembro.nombre)}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Una tarjeta por persona activa; la mía primero (decisión D7). */
-export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrindis, onSubirFoto }: Props) {
+export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, cualidadesOcultas, onBrindis, onSubirFoto }: Props) {
   const [subiendo, setSubiendo] = useState(false);
   const ordenados = [...equipo.filter((m) => m.userId === yo), ...equipo.filter((m) => m.userId !== yo)];
 
@@ -71,11 +55,13 @@ export default function MuroEquipo({ equipo, yo, misVotos, votosAbiertos, onBrin
             className="flex flex-col justify-between rounded-[22px] border-[1.5px] border-[#E6E8EF] bg-white p-5 text-center transition hover:-translate-y-1 hover:shadow-lg"
           >
             <div>
-              <Avatar miembro={m} />
+              <AvatarPersona persona={m} />
               <p className="mb-2.5 font-extrabold leading-snug text-[#1F2229]" style={{ fontFamily: FUENTE_TITULOS }}>
                 {m.nombre}
               </p>
-              {m.cualidades.length > 0 ? (
+              {cualidadesOcultas ? (
+                <p className="mb-4 text-sm font-semibold text-[#5C6170]">🤫 Se desvelan el día del almuerzo</p>
+              ) : m.cualidades.length > 0 ? (
                 <ul className="mb-4 flex flex-wrap justify-center gap-1.5">
                   {m.cualidades.map((c) => (
                     <li key={c.cualidad} className="rounded-full bg-[#F4F6FA] px-2.5 py-1 text-xs font-bold text-[#3E4352]">

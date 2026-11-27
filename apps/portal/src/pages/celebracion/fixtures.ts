@@ -1,4 +1,4 @@
-import type { Evento, Miembro, Resumen, Vista } from './tipos';
+import type { CualidadesEquipo, Evento, Miembro, Resumen, Vista } from './tipos';
 
 // Datos ficticios para las pruebas de la invitación (el repo es público).
 
@@ -59,8 +59,19 @@ export function vistaDePrueba(cambios: Partial<Vista> = {}): Vista {
     misVotos: {},
     // El equipo de prueba son 3 personas: ya brindé por las otras 2 y la confirmación está libre.
     brindis: { dados: 2, minimo: 2 },
+    // Cualidades visibles (como las ve el admin) sin pintar PanelAdmin; la vista realista de un empleado es vistaDeEmpleado().
+    cualidadesOcultas: false,
     ...cambios,
   };
+}
+
+/** Como la recibe quien no es admin: hub-api le manda las cualidades vacías y `cualidadesOcultas: true`. */
+export function vistaDeEmpleado(cambios: Partial<Vista> = {}): Vista {
+  return vistaDePrueba({
+    cualidadesOcultas: true,
+    equipo: equipoDePrueba().map((m) => ({ ...m, cualidades: [] })),
+    ...cambios,
+  });
 }
 
 export function resumenDePrueba(): Resumen {
@@ -83,5 +94,34 @@ export function resumenDePrueba(): Resumen {
       { userId: CARLA, nombre: 'Carla Gómez', estado: 'sin_responder', preferencia: null, mensaje: null, actualizadoEn: null },
     ],
     excluidos: [],
+  };
+}
+
+/** GET /cualidades de prueba: Ana con 5 cualidades (top 3 y 2 más), Bruno con una y foto de perfil, Carla sin brindis. */
+export function cualidadesDePrueba(): CualidadesEquipo {
+  return {
+    equipo: [
+      {
+        userId: YO,
+        nombre: 'Ana Ruiz',
+        avatar: null,
+        foto: FOTO_DE_PRUEBA,
+        cualidades: [
+          { cualidad: 'Empatía', votos: 5 },
+          { cualidad: 'Liderazgo', votos: 3 },
+          { cualidad: 'Compromiso', votos: 2 },
+          { cualidad: 'Creatividad', votos: 1 },
+          { cualidad: 'Trabajo en equipo', votos: 1 },
+        ],
+      },
+      {
+        userId: BRUNO,
+        nombre: 'Bruno Díaz',
+        avatar: 'data:image/jpeg;base64,PERFIL',
+        foto: null,
+        cualidades: [{ cualidad: 'Empatía', votos: 4 }],
+      },
+      { userId: CARLA, nombre: 'Carla Gómez', avatar: null, foto: null, cualidades: [] },
+    ],
   };
 }

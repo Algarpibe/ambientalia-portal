@@ -6,7 +6,7 @@ import { cargarVista, ErrorApi, guardarVotos, subirFotoCelebracion } from './api
 import { notify } from '../../lib/notify';
 import { notifyProfileUpdated } from '../../hooks/useProfile';
 import { fileToResizedDataUrl } from '../../lib/image';
-import { BRUNO, equipoDePrueba, vistaDePrueba } from './fixtures';
+import { BRUNO, CARLA, equipoDePrueba, eventoDePrueba, vistaDeEmpleado, vistaDePrueba } from './fixtures';
 
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
@@ -35,6 +35,16 @@ afterEach(() => {
 async function abrir() {
   render(<CelebracionNavidad />);
   fireEvent.click(await screen.findByRole('button', { name: /Abrir invitación/ }));
+}
+
+const LINEA_OCULTA = '🤫 Los resultados de los brindis se desvelarán el día del almuerzo';
+
+/** Brinda por Bruno con «Compromiso» desde su tarjeta. */
+function brindarPorBruno() {
+  fireEvent.click(within(screen.getByRole('article', { name: 'Bruno Díaz' })).getByRole('button', { name: /Enviar brindis/ }));
+  const dialogo = screen.getByRole('dialog', { name: /Brinda por Bruno/ });
+  fireEvent.click(within(dialogo).getByRole('button', { name: /Compromiso/ }));
+  fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar brindis' }));
 }
 
 describe('CelebracionNavidad · muro', () => {
@@ -112,5 +122,57 @@ describe('CelebracionNavidad · muro', () => {
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
+  });
+
+  it('al empleado, las tarjetas le dicen que las cualidades se desvelan el día del almuerzo', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(vistaDeEmpleado());
+    await abrir();
+    expect(within(screen.getByRole('article', { name: 'Bruno Díaz' })).getByText('🤫 Se desvelan el día del almuerzo')).toBeTruthy();
+  });
+
+  it('con las cualidades ocultas, el brindis que completa el mínimo avisa de que los resultados se desvelarán', async () => {
+    vi.mocked(cargarVista)
+      .mockResolvedValueOnce(vistaDeEmpleado({ brindis: { dados: 1, minimo: 2 }, misVotos: { [CARLA]: ['Empatía'] } }))
+      .mockResolvedValue(
+        vistaDeEmpleado({ brindis: { dados: 2, minimo: 2 }, misVotos: { [CARLA]: ['Empatía'], [BRUNO]: ['Compromiso'] } }),
+      );
+    await abrir();
+    brindarPorBruno();
+    await waitFor(() => expect(guardarVotos).toHaveBeenCalledWith(BRUNO, ['Compromiso']));
+    await waitFor(() =>
+      expect(notify).toHaveBeenCalledWith('🥂 ¡Ya brindaste por todos! Los resultados se desvelarán el día del almuerzo'),
+    );
+    expect(notify).not.toHaveBeenCalledWith('🥂 ¡Brindis enviado para Bruno!');
+  });
+
+  it('el admin, que ve las cualidades, recibe el aviso de siempre aunque complete el mínimo', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(
+      vistaDePrueba({ esAdmin: true, brindis: { dados: 1, minimo: 2 }, misVotos: { [CARLA]: ['Empatía'] } }),
+    );
+    await abrir();
+    brindarPorBruno();
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('🥂 ¡Brindis enviado para Bruno!'));
+    expect(notify).not.toHaveBeenCalledWith(expect.stringContaining('desvelarán'));
+  });
+
+  it('con los brindis completos, «Nuestro equipo» dice que los resultados se desvelarán, también tras el cierre', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(vistaDeEmpleado());
+    await abrir();
+    expect(screen.getByText(LINEA_OCULTA)).toBeTruthy();
+    cleanup();
+    vi.mocked(cargarVista).mockResolvedValue(vistaDeEmpleado({ evento: eventoDePrueba({ confirmacionesAbiertas: false }) }));
+    await abrir();
+    expect(screen.queryByText('🎉 ¡Listo! Ya puedes confirmar tu asistencia')).toBeNull();
+    expect(screen.getByText(LINEA_OCULTA)).toBeTruthy();
+  });
+
+  it('sin los brindis completos, o para el admin, no sale la línea', async () => {
+    vi.mocked(cargarVista).mockResolvedValue(vistaDeEmpleado({ brindis: { dados: 1, minimo: 2 } }));
+    await abrir();
+    expect(screen.queryByText(LINEA_OCULTA)).toBeNull();
+    cleanup();
+    vi.mocked(cargarVista).mockResolvedValue(vistaDePrueba({ esAdmin: true }));
+    await abrir();
+    expect(screen.queryByText(LINEA_OCULTA)).toBeNull();
   });
 });

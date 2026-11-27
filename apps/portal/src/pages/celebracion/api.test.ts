@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { authFetch } from '../../lib/api';
 import {
+  cargarCualidades,
   cargarMiEstado,
   cargarResumen,
   cargarVista,
@@ -35,6 +36,12 @@ describe('api de la invitación', () => {
       '/api/celebracion/mi-estado',
       '/api/celebracion/resumen',
     ]);
+  });
+
+  it('cargarCualidades pide la ruta del admin y devuelve el equipo', async () => {
+    mockFetch.mockResolvedValue(respuesta(200, { equipo: [] }));
+    await expect(cargarCualidades()).resolves.toEqual({ equipo: [] });
+    expect(mockFetch).toHaveBeenCalledWith('/api/celebracion/cualidades');
   });
 
   it('guardarConfirmacion manda un PUT con los datos', async () => {

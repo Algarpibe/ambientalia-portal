@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import MuroEquipo from './MuroEquipo';
 import { notify } from '../../lib/notify';
-import { BRUNO, CARLA, equipoDePrueba, FOTO_DE_PRUEBA, vistaDePrueba, YO } from './fixtures';
+import { BRUNO, CARLA, equipoDePrueba, FOTO_DE_PRUEBA, vistaDeEmpleado, vistaDePrueba, YO } from './fixtures';
 import type { Miembro } from './tipos';
 
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
@@ -13,13 +13,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function pintar(cambios: { votosAbiertos?: boolean; misVotos?: Record<string, string[]>; equipo?: Miembro[] } = {}) {
+function pintar(
+  cambios: { votosAbiertos?: boolean; misVotos?: Record<string, string[]>; equipo?: Miembro[]; cualidadesOcultas?: boolean } = {},
+) {
   const vista = vistaDePrueba();
   const props = {
     equipo: cambios.equipo ?? vista.equipo,
     yo: YO,
     misVotos: cambios.misVotos ?? {},
     votosAbiertos: cambios.votosAbiertos ?? true,
+    cualidadesOcultas: cambios.cualidadesOcultas ?? false,
     onBrindis: vi.fn(),
     onSubirFoto: vi.fn(async () => {}),
   };
@@ -88,5 +91,25 @@ describe('MuroEquipo', () => {
     const foto = new File(['x'], 'yo.png', { type: 'image/png' });
     fireEvent.change(entrada, { target: { files: [foto] } });
     await waitFor(() => expect(props.onSubirFoto).toHaveBeenCalledWith(foto));
+  });
+
+  it('con las cualidades ocultas, cada tarjeta dice que se desvelan el día del almuerzo, sin pistas, y los botones siguen', () => {
+    // El equipo CON cualidades (Bruno trae dos): si la rama oculta no existiera, saldrían.
+    pintar({ cualidadesOcultas: true, equipo: equipoDePrueba() });
+    for (const nombre of ['Ana Ruiz', 'Bruno Díaz', 'Carla Gómez']) {
+      expect(within(tarjeta(nombre)).getByText('🤫 Se desvelan el día del almuerzo')).toBeTruthy();
+    }
+    expect(screen.queryByText('Aún nadie ha brindado por ti.')).toBeNull();
+    expect(screen.queryByText(/Sé el primero en brindar/)).toBeNull();
+    expect(screen.queryByText(/✨/)).toBeNull();
+    expect(screen.queryByText(/Empatía|Liderazgo|· \d/)).toBeNull();
+    expect(within(tarjeta('Bruno Díaz')).getByRole('button', { name: /Enviar brindis/ })).toBeTruthy();
+    expect(within(tarjeta('Ana Ruiz')).getByLabelText(/foto graciosa/)).toBeTruthy();
+  });
+
+  it('con las cualidades ocultas y los votos cerrados tampoco dice «Sin brindis.»', () => {
+    pintar({ cualidadesOcultas: true, votosAbiertos: false, equipo: vistaDeEmpleado().equipo });
+    expect(screen.queryByText('Sin brindis.')).toBeNull();
+    expect(screen.getAllByText('🤫 Se desvelan el día del almuerzo')).toHaveLength(3);
   });
 });
