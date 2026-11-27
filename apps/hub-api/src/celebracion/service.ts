@@ -87,6 +87,8 @@ export interface Vista {
   misVotos: Record<string, string[]>;
   /** Brindis por compañeros invitados distintos que llevo y los que hacen falta para responder. */
   brindis: { dados: number; minimo: number };
+  /** true para quien no es admin: sus `cualidades` llegan vacías; se desvelan el día del almuerzo. */
+  cualidadesOcultas: boolean;
 }
 
 export interface MiEstado {
@@ -181,9 +183,10 @@ export class CelebracionService {
       },
       yo: sesion.userId,
       esAdmin: sesion.esAdmin,
+      // Los conteos solo le llegan al admin: si no, se verían en las herramientas del navegador.
       equipo: equipo.map((m) => ({
         ...m,
-        cualidades: top3(porVotado.get(m.userId) ?? []),
+        cualidades: sesion.esAdmin ? top3(porVotado.get(m.userId) ?? []) : [],
         foto: fotoDe.get(m.userId.toLowerCase()) ?? null,
       })),
       miRespuesta: confirmacion
@@ -196,6 +199,7 @@ export class CelebracionService {
         : null,
       misVotos,
       brindis: this.brindis(equipo, mios, sesion.userId),
+      cualidadesOcultas: !sesion.esAdmin,
     };
   }
 
