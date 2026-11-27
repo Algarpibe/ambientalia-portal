@@ -84,12 +84,12 @@ describe('CelebracionNavidad · muro', () => {
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
   });
 
-  it('subir mi foto graciosa la redimensiona a 512, la guarda sin tocar el perfil y recarga', async () => {
+  it('subir mi foto graciosa la redimensiona a 256, la guarda sin tocar el perfil y recarga', async () => {
     await abrir();
     const entrada = within(screen.getByRole('article', { name: 'Ana Ruiz' })).getByLabelText(/foto graciosa/);
     fireEvent.change(entrada, { target: { files: [new File(['x'], 'yo.png', { type: 'image/png' })] } });
     await waitFor(() => expect(subirFotoCelebracion).toHaveBeenCalledWith('data:image/jpeg;base64,AAAA'));
-    expect(fileToResizedDataUrl).toHaveBeenCalledWith(expect.any(File), 512, 0.8);
+    expect(fileToResizedDataUrl).toHaveBeenCalledWith(expect.any(File), 256, 0.75);
     await waitFor(() => expect(cargarVista).toHaveBeenCalledTimes(2));
     expect(notify).toHaveBeenCalledWith('📸 ¡Foto graciosa lista!');
     expect(notifyProfileUpdated).not.toHaveBeenCalled();

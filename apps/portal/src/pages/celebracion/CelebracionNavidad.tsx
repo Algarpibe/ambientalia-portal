@@ -171,7 +171,9 @@ export default function CelebracionNavidad() {
 
   const subirFoto = async (archivo: File) => {
     try {
-      await subirFotoCelebracion(await fileToResizedDataUrl(archivo, 512, 0.8));
+      // 256 px como las fotos de perfil: el muro la pinta a 74 px y la página
+      // recarga el equipo entero tras cada brindis (datos móviles).
+      await subirFotoCelebracion(await fileToResizedDataUrl(archivo, 256, 0.75));
     } catch (e) {
       notify(e instanceof ErrorApi ? mensajeDeError(e) : 'No se pudo subir la foto.', 'error');
       return;
