@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import logo from '../../assets/ambientalia-logo.png';
+import { notifyProfileUpdated } from '../../hooks/useProfile';
+import { fileToResizedDataUrl } from '../../lib/image';
 import { notify } from '../../lib/notify';
-import { cargarVista, guardarConfirmacion, mensajeDeError } from './api';
+import { cargarVista, guardarConfirmacion, guardarVotos, mensajeDeError, subirMiFoto } from './api';
 import { lanzarConfeti } from './confeti';
 import Confirmacion from './Confirmacion';
 import CuentaAtras from './CuentaAtras';
 import { BOTON } from './estilos';
 import { diaYMes } from './fechas';
 import { ESPECTRO, FUENTE_TEXTO, FUENTE_TITULOS, TITULO_DEGRADADO } from './marca';
+import ModalCualidades from './ModalCualidades';
+import MuroEquipo from './MuroEquipo';
+import { primerNombre } from './persona';
 import Portada from './Portada';
 import TarjetasEvento from './TarjetasEvento';
-import type { DatosConfirmacion, Vista } from './tipos';
+import type { DatosConfirmacion, Miembro, Vista } from './tipos';
 import { Etiqueta, Tarjeta, Titulo } from './ui';
 
 const TITULO_PESTANA = 'Almuerzo de fin de año · Portal Ambientalia';
@@ -41,6 +46,7 @@ export default function CelebracionNavidad() {
   const [vista, setVista] = useState<Vista | null>(null);
   const [fallo, setFallo] = useState(false);
   const [abierta, setAbierta] = useState(false);
+  const [brindisPara, setBrindisPara] = useState<Miembro | null>(null);
   const tituloRef = useRef<HTMLHeadingElement>(null);
 
   const recargar = useCallback(async () => {
@@ -108,6 +114,36 @@ export default function CelebracionNavidad() {
     await recargar();
   };
 
+  const brindar = async (cualidades: string[]) => {
+    if (!brindisPara) return;
+    try {
+      await guardarVotos(brindisPara.userId, cualidades);
+    } catch (e) {
+      notify(mensajeDeError(e), 'error');
+      throw e;
+    }
+    if (cualidades.length > 0) {
+      notify(`🥂 ¡Brindis enviado para ${primerNombre(brindisPara.nombre)}!`);
+      lanzarConfeti();
+    } else {
+      notify('Brindis retirado.');
+    }
+    setBrindisPara(null);
+    await recargar();
+  };
+
+  const subirFoto = async (archivo: File) => {
+    try {
+      await subirMiFoto(await fileToResizedDataUrl(archivo, 256, 0.85));
+    } catch {
+      notify('No se pudo actualizar la foto.', 'error');
+      return;
+    }
+    notify('📸 Foto actualizada en el muro del equipo.');
+    notifyProfileUpdated();
+    await recargar();
+  };
+
   const { evento } = vista;
 
   return (
@@ -155,6 +191,27 @@ export default function CelebracionNavidad() {
 
         <TarjetasEvento evento={evento} />
 
+        <section aria-labelledby="titulo-equipo" className="mb-6">
+          <Tarjeta>
+            <div className="mx-auto mb-6 max-w-2xl text-center">
+              <Etiqueta tono="pink">🌟 El corazón de Ambientalia</Etiqueta>
+              <Titulo id="titulo-equipo">Nuestro equipo</Titulo>
+              <p className="text-sm text-[#5C6170]">
+                Brinda por tus compañeros eligiendo hasta {evento.maxCualidades} cualidades: tu voto es anónimo. Sube tu foto
+                desde tu tarjeta.
+              </p>
+            </div>
+            <MuroEquipo
+              equipo={vista.equipo}
+              yo={vista.yo}
+              misVotos={vista.misVotos}
+              votosAbiertos={evento.votosAbiertos}
+              onBrindis={setBrindisPara}
+              onSubirFoto={subirFoto}
+            />
+          </Tarjeta>
+        </section>
+
         <section aria-labelledby="titulo-confirmacion" className="mb-6">
           <Tarjeta>
             <Etiqueta tono="teal">🎟️ Confirmación y pase digital</Etiqueta>
@@ -172,6 +229,17 @@ export default function CelebracionNavidad() {
           <strong>Ambientalia S.A.S.</strong> · {evento.titulo}
         </footer>
       </main>
+
+      {brindisPara && (
+        <ModalCualidades
+          nombre={brindisPara.nombre}
+          cualidades={evento.cualidades}
+          max={evento.maxCualidades}
+          seleccionInicial={vista.misVotos[brindisPara.userId] ?? []}
+          onGuardar={brindar}
+          onCerrar={() => setBrindisPara(null)}
+        />
+      )}
     </div>
   );
 }
