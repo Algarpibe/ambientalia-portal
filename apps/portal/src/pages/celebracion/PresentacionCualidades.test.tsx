@@ -99,6 +99,52 @@ describe('PresentacionCualidades', () => {
     expect(onCerrar).toHaveBeenCalledTimes(2);
   });
 
+  it('el resto de la página queda inerte mientras está abierta y se libera al cerrarla', async () => {
+    const { container, unmount } = render(<PresentacionCualidades onCerrar={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'Ana Ruiz' });
+    expect(container.hasAttribute('inert')).toBe(true);
+    unmount();
+    expect(container.hasAttribute('inert')).toBe(false);
+  });
+
+  it('«Pantalla completa» vuelve a pedirla', async () => {
+    const pedir = vi.fn(() => Promise.resolve());
+    (document.documentElement as unknown as Record<string, unknown>).requestFullscreen = pedir;
+    try {
+      pintar();
+      await screen.findByRole('heading', { name: 'Ana Ruiz' });
+      fireEvent.click(boton(/Pantalla completa/));
+      expect(pedir).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (document.documentElement as unknown as Record<string, unknown>).requestFullscreen;
+    }
+  });
+
+  it('PageDown y PageUp mueven como los mandos de presentación; con Alt, Ctrl o Meta no se mueve', async () => {
+    pintar();
+    await screen.findByRole('heading', { name: 'Ana Ruiz' });
+    fireEvent.keyDown(window, { key: 'PageDown' });
+    expect(contador()).toBe('2 / 3');
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    expect(contador()).toBe('2 / 3');
+    fireEvent.keyDown(window, { key: 'PageUp' });
+    expect(contador()).toBe('1 / 3');
+  });
+
+  it('sin nadie en la invitación lo dice y deja deshabilitados mover e imprimir', async () => {
+    vi.mocked(cargarCualidades).mockResolvedValue({ equipo: [] });
+    pintar();
+    expect(await screen.findByText('No hay nadie en la invitación.')).toBeTruthy();
+    for (const nombre of [/Anterior/, /Siguiente/, /Imprimir/]) expect(boton(nombre).disabled).toBe(true);
+  });
+
+  it('mientras carga, mover e imprimir están deshabilitados y el contador, vacío', () => {
+    vi.mocked(cargarCualidades).mockReturnValue(new Promise(() => {}));
+    pintar();
+    for (const nombre of [/Anterior/, /Siguiente/, /Imprimir/]) expect(boton(nombre).disabled).toBe(true);
+    expect(contador()).toBe('');
+  });
+
   it('«Imprimir» abre el diálogo del navegador; la versión imprimible tiene a todos, uno por hoja, sin botones ni el resto del portal', async () => {
     const imprimir = vi.spyOn(window, 'print').mockImplementation(() => {});
     try {

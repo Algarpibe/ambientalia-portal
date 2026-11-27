@@ -4,6 +4,7 @@ import { cargarCualidades } from './api';
 import AvatarPersona from './AvatarPersona';
 import { BOTON, BOTON_PRIMARIO } from './estilos';
 import { FUENTE_TEXTO, FUENTE_TITULOS } from './marca';
+import { entrarPantallaCompleta } from './pantallaCompleta';
 import type { Miembro } from './tipos';
 
 interface Props {
@@ -31,10 +32,14 @@ function Hoja({ persona, actual }: { persona: Miembro; actual: boolean }) {
       data-testid="hoja"
       aria-label={persona.nombre}
       aria-hidden={!actual}
-      className={`${actual ? 'flex' : 'hidden print:flex'} flex-1 break-after-page flex-col items-center justify-center px-6 py-10 text-center last:break-after-auto print:py-8`}
+      className={`${actual ? 'flex' : 'hidden print:flex'} flex-1 break-after-page flex-col items-center justify-center px-6 py-10 text-center last:break-after-auto print:py-8 [@media(max-height:820px)]:py-6`}
     >
-      <AvatarPersona persona={persona} className="mb-6 h-44 w-44 p-1.5 sm:h-60 sm:w-60" claseIniciales="text-6xl" />
-      <h2 className="mb-8 text-4xl font-black text-[#1F2229] sm:text-6xl" style={{ fontFamily: FUENTE_TITULOS }}>
+      <AvatarPersona
+        persona={persona}
+        className="mb-6 h-44 w-44 p-1.5 sm:h-60 sm:w-60 print:h-40 print:w-40 [@media(max-height:820px)]:h-40 [@media(max-height:820px)]:w-40"
+        claseIniciales="text-6xl"
+      />
+      <h2 className="mb-8 text-4xl font-black text-[#1F2229] sm:text-6xl [@media(max-height:820px)]:text-5xl" style={{ fontFamily: FUENTE_TITULOS }}>
         {persona.nombre}
       </h2>
       {persona.cualidades.length === 0 ? (
@@ -43,7 +48,7 @@ function Hoja({ persona, actual }: { persona: Miembro; actual: boolean }) {
         <>
           <ol aria-label="Top 3" className="mb-8 space-y-3">
             {grandes.map((c) => (
-              <li key={c.cualidad} className="text-3xl font-extrabold text-[#2B2D35] sm:text-5xl" style={{ fontFamily: FUENTE_TITULOS }}>
+              <li key={c.cualidad} className="text-3xl font-extrabold text-[#2B2D35] sm:text-5xl [@media(max-height:820px)]:text-4xl" style={{ fontFamily: FUENTE_TITULOS }}>
                 ✨ {c.cualidad} · {c.votos}
               </li>
             ))}
@@ -86,8 +91,16 @@ export default function PresentacionCualidades({ onCerrar }: Props) {
     void cargar();
   }, [cargar]);
 
+  // Foco y fondo inerte: el resto de la página no se alcanza con el teclado ni con el lector mientras está abierta.
   useEffect(() => {
+    const previo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const hermanos = Array.from(document.body.children).filter((el) => el !== capaRef.current && !el.hasAttribute('inert'));
+    hermanos.forEach((el) => el.setAttribute('inert', ''));
     capaRef.current?.focus();
+    return () => {
+      hermanos.forEach((el) => el.removeAttribute('inert'));
+      previo?.focus();
+    };
   }, []);
 
   const mover = useCallback(
@@ -98,9 +111,15 @@ export default function PresentacionCualidades({ onCerrar }: Props) {
   // Con la pantalla completa del sistema, la primera Esc se la queda el navegador para salir de ella (decisión P2).
   useEffect(() => {
     const alPulsar = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === 'Escape') onCerrar();
-      else if (e.key === 'ArrowRight') mover(1);
-      else if (e.key === 'ArrowLeft') mover(-1);
+      else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        mover(1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        mover(-1);
+      }
     };
     window.addEventListener('keydown', alPulsar);
     return () => window.removeEventListener('keydown', alPulsar);
@@ -119,20 +138,23 @@ export default function PresentacionCualidades({ onCerrar }: Props) {
       aria-modal="true"
       aria-label="Presentación de cualidades"
       tabIndex={-1}
-      className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-white text-[#2B2D35] outline-none print:static print:block print:overflow-visible"
+      className="fixed inset-0 z-[60] flex flex-col overflow-y-auto overscroll-contain bg-white text-[#2B2D35] outline-none print:static print:block print:overflow-visible"
       style={{ fontFamily: FUENTE_TEXTO }}
     >
       <style>{REGLA_IMPRESION}</style>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E6E8EF] px-4 py-3 print:hidden">
-        <span data-testid="contador" className="text-lg font-extrabold" style={{ fontFamily: FUENTE_TITULOS }}>
+        <span data-testid="contador" aria-live="polite" className="text-lg font-extrabold" style={{ fontFamily: FUENTE_TITULOS }}>
           {listo ? `${indice + 1} / ${total}` : ''}
         </span>
         <div className="flex flex-wrap gap-2">
           <button type="button" className={BOTON} disabled={!listo || indice === 0} onClick={() => mover(-1)}>
-            ← Anterior
+            <span aria-hidden="true">←</span> Anterior
           </button>
           <button type="button" className={BOTON} disabled={!listo || indice >= total - 1} onClick={() => mover(1)}>
-            Siguiente →
+            Siguiente <span aria-hidden="true">→</span>
+          </button>
+          <button type="button" className={BOTON} onClick={entrarPantallaCompleta}>
+            ⛶ Pantalla completa
           </button>
           <button type="button" className={BOTON} disabled={!listo} onClick={() => window.print()}>
             🖨️ Imprimir

@@ -23,7 +23,16 @@ describe('pantalla completa', () => {
     raiz.requestFullscreen = pedir;
     entrarPantallaCompleta();
     expect(pedir).toHaveBeenCalledTimes(1);
-    await Promise.resolve(); // el rechazo ya tiene su catch: no sale «unhandled rejection»
+    await Promise.resolve(); // Vitest falla ante un rechazo sin capturar: que no falle es la garantía del catch
+  });
+
+  it('si el navegador rechaza la salida, tampoco falla', async () => {
+    const salir = vi.fn(() => Promise.reject(new Error('ya había salido')));
+    doc.exitFullscreen = salir;
+    doc.fullscreenElement = document.documentElement;
+    expect(() => salirPantallaCompleta()).not.toThrow();
+    expect(salir).toHaveBeenCalledTimes(1);
+    await Promise.resolve(); // Vitest falla ante un rechazo sin capturar: que no falle es la garantía del catch
   });
 
   it('sale de la pantalla completa solo si la página está en ella', () => {

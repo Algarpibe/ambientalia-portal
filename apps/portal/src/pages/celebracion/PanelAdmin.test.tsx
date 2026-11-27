@@ -116,6 +116,28 @@ describe('PanelAdmin', () => {
     expect(document.querySelector('[data-presentacion-cualidades]')).toBeNull();
   });
 
+  it('al cerrar la presentación el foco vuelve al botón «Presentar cualidades»', async () => {
+    vi.mocked(cargarResumen).mockResolvedValue(resumenDePrueba());
+    vi.mocked(cargarCualidades).mockResolvedValue(cualidadesDePrueba());
+    pintar();
+    await screen.findByTestId('cifra-van');
+    const abrir = screen.getByRole('button', { name: /Presentar cualidades/ });
+    abrir.focus(); // jsdom no enfoca al hacer clic
+    fireEvent.click(abrir);
+    await screen.findByRole('heading', { name: 'Ana Ruiz' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(document.activeElement).toBe(abrir);
+  });
+
+  it('al desmontar el panel sale de la pantalla completa', async () => {
+    vi.mocked(cargarResumen).mockResolvedValue(resumenDePrueba());
+    const { unmount } = pintar();
+    await screen.findByTestId('cifra-van');
+    vi.mocked(salirPantallaCompleta).mockClear();
+    unmount();
+    expect(salirPantallaCompleta).toHaveBeenCalledTimes(1);
+  });
+
   it('«Presentar cualidades» no depende del resumen: sigue ahí aunque falle', async () => {
     vi.mocked(cargarResumen).mockRejectedValue(new Error('red'));
     pintar();
