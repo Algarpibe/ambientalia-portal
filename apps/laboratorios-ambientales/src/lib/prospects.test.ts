@@ -5,6 +5,7 @@ import type { Prospecto } from './prospects';
 import {
   clave,
   departamentosDe,
+  distintos,
   esGrasasYAceites,
   esInfrarrojo,
   estadoVigencia,
@@ -406,5 +407,15 @@ describe('nitCoincide', () => {
   it('las cifras dentro de un texto no son un NIT', () => {
     expect(nitCoincide('900.000.001-7', 'ambiental 1')).toBe(false);
     expect(nitCoincide('900.000.001-7', '900111')).toBe(false);
+  });
+
+  it('una búsqueda vacía casa con cualquier NIT', () => {
+    expect(nitCoincide('900.000.001-7', '')).toBe(true);
+  });
+});
+
+describe('distintos', () => {
+  it('recorta, quita vacíos y repetidos, y ordena en español', () => {
+    expect(distintos(['  Bogotá', 'Bogotá', '', 'Ávila', 'Cali '])).toEqual(['Ávila', 'Bogotá', 'Cali']);
   });
 });
