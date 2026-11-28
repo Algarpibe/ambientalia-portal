@@ -55,18 +55,31 @@ describe('groupLabsByEquipment', () => {
   });
 
   it('filtra por un fabricante que figura dentro de un texto de co-fabricantes', () => {
-    const codigo = Object.entries(EQUIPMENT_MAP).find(
+    const entrada = Object.entries(EQUIPMENT_MAP).find(
       ([, e]) => e.brand === 'Tisch Environmental / New Star Environmental',
-    )![0];
+    );
+    expect(entrada).toBeDefined();
+    const [codigo, equipo] = entrada!;
     const data = [lab({ metodo: codigo }), lab({ metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' })];
     for (const marca of ['Tisch Environmental', 'New Star Environmental']) {
       const res = groupLabsByEquipment(data, marca, '');
       expect(res.map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);
+      // Un fabricante junto al modelo combinado también coincide.
+      expect(groupLabsByEquipment(data, marca, equipo.model).map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);
     }
   });
 
+  it('filtra por Thermo Scientific una entrada que solo dice Rupprecht & Patashnick en su texto de marca', () => {
+    const entrada = Object.entries(EQUIPMENT_MAP).find(([, e]) => e.brand === 'Thermo Scientific / Rupprecht & Patashnick');
+    expect(entrada).toBeDefined();
+    const data = [lab({ metodo: entrada![0] }), lab({ metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' })];
+    expect(groupLabsByEquipment(data, 'Thermo Scientific', '').map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);
+  });
+
   it('filtra por el nombre de grupo de una empresa con nombre viejo y nuevo', () => {
-    const codigo = Object.entries(EQUIPMENT_MAP).find(([, e]) => e.brand === 'Environnement S.A. / ENVEA')![0];
+    const entrada = Object.entries(EQUIPMENT_MAP).find(([, e]) => e.brand === 'Environnement S.A. / ENVEA');
+    expect(entrada).toBeDefined();
+    const codigo = entrada![0];
     const data = [lab({ metodo: codigo }), lab({ metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' })];
     const res = groupLabsByEquipment(data, 'Environnement S.A. / ENVEA', '');
     expect(res.map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);

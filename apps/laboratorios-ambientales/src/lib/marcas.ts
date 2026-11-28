@@ -6,17 +6,31 @@
 // designación («Tisch Environmental / New Star Environmental»), que son dos
 // opciones; o una misma empresa con nombre viejo y nuevo («Environnement S.A. /
 // ENVEA»), que es una sola. Como el texto no distingue una cosa de la otra, esta
-// lista dice qué fabricantes son la misma empresa. La opción de un grupo es sus
-// nombres unidos con « / », en este orden.
-export const GRUPOS_DE_EMPRESA: string[][] = [
-  ['Environnement S.A.', 'ENVEA'],
-  ['BGI Inc.', 'Mesa Laboratories Inc.'],
-  ['Ecotech', 'Acoem'],
-  ['Graseby Andersen', 'Sierra-Andersen', 'General Metal Works'],
+// lista dice qué nombres son la misma empresa: un grupo es una empresa con varios
+// nombres, y su opción muestra la `etiqueta` (no los nombres unidos, salvo que
+// la etiqueta los una a propósito).
+type GrupoDeEmpresa = { readonly etiqueta: string; readonly nombres: readonly string[] };
+
+const GRUPOS_DE_EMPRESA: readonly GrupoDeEmpresa[] = [
+  { etiqueta: 'Environnement S.A. / ENVEA', nombres: ['Environnement S.A.', 'ENVEA'] },
+  { etiqueta: 'BGI Inc. / Mesa Laboratories Inc.', nombres: ['BGI Inc.', 'Mesa Laboratories Inc.'] },
+  { etiqueta: 'Ecotech / Acoem', nombres: ['Ecotech', 'Acoem'] },
+  {
+    etiqueta: 'Graseby Andersen / Sierra-Andersen / General Metal Works',
+    nombres: ['Graseby Andersen', 'Sierra-Andersen', 'General Metal Works'],
+  },
+  // Una sola marca para el usuario: Thermo Scientific absorbió a las demás.
+  {
+    etiqueta: 'Thermo Scientific',
+    nombres: ['Thermo Scientific', 'Thermo Environmental', 'Thermo Andersen', 'Rupprecht & Patashnick'],
+  },
+  // Advanced Pollution Instrumentation es el nombre antiguo de Teledyne API;
+  // Teledyne Monitor Labs es otra empresa y queda aparte.
+  { etiqueta: 'Teledyne API', nombres: ['Teledyne API', 'Advanced Pollution Instrumentation'] },
 ];
 
-const ETIQUETA_DE_FABRICANTE = new Map<string, string>(
-  GRUPOS_DE_EMPRESA.flatMap((grupo) => grupo.map((fabricante) => [fabricante, grupo.join(' / ')] as const)),
+const ETIQUETA_DE_FABRICANTE: ReadonlyMap<string, string> = new Map(
+  GRUPOS_DE_EMPRESA.flatMap((grupo) => grupo.nombres.map((nombre) => [nombre, grupo.etiqueta] as const)),
 );
 
 // Las marcas de un texto de marca: cada fabricante, y las empresas con varios

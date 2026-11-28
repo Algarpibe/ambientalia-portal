@@ -153,8 +153,32 @@ describe('listBrands / listModels', () => {
   });
 
   it('los modelos de un fabricante incluyen los de los textos de co-fabricantes', () => {
-    const solo = Object.values(EQUIPMENT_MAP).find((e) => e.brand === 'Tisch Environmental / New Star Environmental')!;
-    expect(listModels('Tisch Environmental')).toContain(solo.model);
-    expect(listModels('New Star Environmental')).toContain(solo.model);
+    const combinada = Object.values(EQUIPMENT_MAP).find(
+      (e) => e.brand === 'Tisch Environmental / New Star Environmental',
+    );
+    expect(combinada).toBeDefined();
+    expect(listModels('Tisch Environmental')).toContain(combinada?.model);
+    expect(listModels('New Star Environmental')).toContain(combinada?.model);
+  });
+
+  it('Thermo Scientific es una sola opción y no quedan sus nombres anteriores', () => {
+    const brands = listBrands();
+    expect(brands.filter((b) => b === 'Thermo Scientific')).toHaveLength(1);
+    for (const viejo of ['Thermo Environmental', 'Thermo Andersen', 'Rupprecht & Patashnick']) {
+      expect(brands).not.toContain(viejo);
+    }
+  });
+
+  it('los modelos de Thermo Scientific incluyen los de sus nombres anteriores', () => {
+    const modelos = listModels('Thermo Scientific');
+    expect(modelos).toContain('42i / 42iQ Series');
+    expect(modelos).toContain('Partisol 2000-D / 2000i-D');
+  });
+
+  it('Advanced Pollution Instrumentation se une a Teledyne API; Teledyne Monitor Labs queda aparte', () => {
+    const brands = listBrands();
+    expect(brands).not.toContain('Advanced Pollution Instrumentation');
+    expect(brands).toContain('Teledyne Monitor Labs');
+    expect(listModels('Teledyne API')).toContain('100');
   });
 });

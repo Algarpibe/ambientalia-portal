@@ -26,6 +26,21 @@ describe('marcasDe', () => {
     expect(marcasDe('Tisch Environmental / New Star Environmental')).toHaveLength(2);
   });
 
+  it('Thermo Scientific y sus nombres anteriores son una sola marca con la etiqueta «Thermo Scientific»', () => {
+    expect(marcasDe('Thermo Scientific / Rupprecht & Patashnick')).toEqual(['Thermo Scientific']);
+    expect(marcasDe('Thermo Andersen / Thermo Scientific')).toEqual(['Thermo Scientific']);
+    expect(marcasDe('Thermo Environmental')).toEqual(['Thermo Scientific']);
+    expect(marcasDe('Wedding & Associates / Thermo Environmental')).toEqual([
+      'Wedding & Associates',
+      'Thermo Scientific',
+    ]);
+  });
+
+  it('el nombre anterior de Teledyne API es Teledyne API; Teledyne Monitor Labs sigue aparte', () => {
+    expect(marcasDe('Advanced Pollution Instrumentation')).toEqual(['Teledyne API']);
+    expect(marcasDe('Teledyne Monitor Labs')).toEqual(['Teledyne Monitor Labs']);
+  });
+
   it('un texto largo mezcla fabricantes sueltos y grupos', () => {
     expect(
       marcasDe('Teledyne Monitor Labs / Casella / Ecotech / Acoem / Aeris / Wedding & Associates'),

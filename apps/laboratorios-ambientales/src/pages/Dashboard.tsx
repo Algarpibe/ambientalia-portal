@@ -24,8 +24,9 @@ export default function Dashboard({ data, onBack }: Props) {
 
   const totalEquipos = useMemo(() => labs.reduce((suma, lab) => suma + lab.equipos.length, 0), [labs]);
 
-  // Un modelo pertenece a una sola marca: al cambiar de marca el modelo elegido
-  // deja de existir y dejaría la vista vacía.
+  // Los modelos que se ofrecen dependen de la marca (un modelo combinado como
+  // «TE-6070 / NS-6070» cuelga de dos fabricantes): al cambiar de marca el modelo
+  // elegido puede dejar de existir y dejaría la vista vacía.
   const cambiarMarca = (valor: string) => {
     setBrand(valor);
     setModel('');
