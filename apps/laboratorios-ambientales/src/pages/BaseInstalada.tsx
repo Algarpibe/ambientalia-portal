@@ -68,7 +68,7 @@ export default function BaseInstalada({ data, onBack }: Props) {
   const { cruce, estadoCruce, reintentar } = useCruceZoho(nits);
 
   const visibles = useMemo(() => filtrarEquipos(todos, filtros, cruce, hoy), [todos, filtros, cruce, hoy]);
-  // Son ~1.200 filas sin paginar: la tabla se pinta con el valor diferido para
+  // Son ~1.275 filas sin paginar: la tabla se pinta con el valor diferido para
   // que escribir en la búsqueda no se trabe. El recuento y el Excel usan `visibles`.
   const filas = useDeferredValue(visibles);
 
@@ -279,7 +279,7 @@ type PropsTabla = {
 
 // Memoizada para que useDeferredValue sirva: con las mismas props (el `filas`
 // diferido, el `cruce` y el `estadoCruce` del hook, y el `hoy` fijo al abrir) un
-// render urgente por escribir en la búsqueda no vuelve a recorrer las ~1.250 filas.
+// render urgente por escribir en la búsqueda no vuelve a recorrer las ~1.275 filas.
 const TablaEquipos = memo(function TablaEquipos({ filas, cruce, estadoCruce, hoy }: PropsTabla) {
   return (
     <>

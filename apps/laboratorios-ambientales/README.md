@@ -178,8 +178,8 @@ no aparecerá en el Análisis de Marcas ni tendrá marca en la Base instalada.
   blancas a propósito.
 - **Corregido el 2026-11-27:** nueve entradas del prototipo no cuadraban con la
   lista de la EPA. EQPM-0308-170, EQPM-0715-266, RFSA-0616-237 y EQPM-0923-262
-  tenían la marca o el modelo de otro código. A EQPM-0798-122 le faltaban
-  Horiba y los demás fabricantes, y a los cuatro Horiba, su modelo -380. Se
+  tenían la marca o el modelo de otro código. A EQPM-0798-122 le faltaba el
+  modelo BAM 1020-1, y a los cuatro Horiba, su modelo -380. Se
   añadieron además variantes de modelo a EQOA-0193-091, EQSA-0193-092 y
   RFNA-0118-249, y el BAM 1020-1.
 

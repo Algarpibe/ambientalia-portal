@@ -76,7 +76,7 @@ línea, y también por un guion, raya (`–`, `—`) o `/` con un espacio al men
 un lado («1001 - 1002», «2001 -2002», «3001- 3002», «4001 / 4002»). Cada trozo
 se recorta y los vacíos se descartan. Un guion o `/` pegado por los dos lados es
 parte de la serie, y tampoco se parte por espacios solos: hay series como
-«43c-61340-330/2».
+«XY-12345-678/2».
 
 **Un equipo.** Es la pareja código de laboratorio + serie, con la serie en
 mayúsculas para comparar. Todas las filas de esa pareja forman un solo equipo.

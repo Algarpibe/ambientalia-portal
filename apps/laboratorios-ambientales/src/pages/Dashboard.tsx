@@ -54,7 +54,7 @@ export default function Dashboard({ data, onBack }: Props) {
       </div>
 
       {/* El ámbito es fijo y acotado: sin decirlo, el usuario no entendería por qué
-          ve 56 laboratorios de los cientos que hay en el buscador. */}
+          ve unas decenas de laboratorios de los cientos que hay en el buscador. */}
       <div className="bg-teal-50 ring-1 ring-teal-200 rounded-xl p-4 mb-6">
         <p className="text-sm font-semibold text-teal-900 mb-2">Ámbito fijo de este análisis</p>
         <div className="flex flex-wrap gap-2">
