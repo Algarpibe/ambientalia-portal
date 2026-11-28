@@ -2,8 +2,9 @@
 
 Buscador y análisis de los laboratorios ambientales acreditados por el IDEAM,
 sobre el dataset abierto [`2waz-acaa`](https://www.datos.gov.co/resource/2waz-acaa.json)
-de datos.gov.co (~19.000 acreditaciones). La vista de prospectos cruza además
-cada laboratorio con Zoho Books por NIT, a través de hub-api.
+de datos.gov.co (~19.000 acreditaciones). Las vistas de prospectos y de base
+instalada de aire cruzan además cada laboratorio con Zoho Books por NIT, a
+través de hub-api.
 
 ## Cómo se ejecuta
 
@@ -33,19 +34,23 @@ porque el bundle lo produce el portal.
 | `src/lib/normalize.ts` | Valores canónicos de estado, matriz, componente y actividad. |
 | `src/lib/filters.ts` | Filtrado y opciones en cascada. |
 | `src/lib/pagination.ts` | Paginación de la tabla de resultados. |
-| `src/lib/equipment.ts` | Catálogo de 46 equipos de calidad del aire. |
+| `src/lib/equipment.ts` | Catálogo de 82 códigos de equipos de calidad del aire, normalización de códigos escritos con espacios y fe de erratas (ver «El catálogo de equipos se mantiene a mano»). |
+| `src/lib/marcas.ts` | La regla de marcas que comparten la Base instalada y el Análisis de Marcas (`marcasDe`). |
 | `src/lib/brands.ts` | Agrupación laboratorio→equipos del Análisis de Marcas. |
 | `src/lib/prospects.ts` | Prospectos de grasas y aceites: qué acreditación cuenta, infrarrojo o gravimetría, agrupación por laboratorio, vigencia, orden y filtros. |
 | `src/lib/exportProspects.ts` | Filas y nombre de fichero del Excel de prospectos. |
 | `src/lib/clientes.ts` | Cruce con Zoho: NIT base, estado de cliente (36 meses), filtro y estado de la consulta (`estadoDelCruce`). |
 | `src/services/clientesZoho.ts` | Consulta del cruce a hub-api (`POST /api/laboratorios/clientes`), con el JWT del portal y tope de tiempo. |
-| `src/lib/fechas.ts` | Fecha local de hoy y suma de meses de calendario. |
-| `src/lib/view.ts` | La vista abierta, en el hash de la URL (`#buscador`, `#marcas`, `#prospectos`). |
-| `src/pages/` | Vistas: `Buscador`, `Dashboard` (Análisis de Marcas) y `Prospectos`. |
-| `src/components/` | Piezas de vista: `CeldaCliente`, la celda de la columna «Cliente». |
+| `src/lib/baseInstalada.ts` | Base instalada de aire: valor vacío, series, qué registro entra, agrupación por equipo, códigos EPA, orden, filtros, opciones y recuento. |
+| `src/lib/exportBaseInstalada.ts` | Filas y nombre de fichero del Excel de la base instalada. |
+| `src/lib/fechas.ts` | Fecha local de hoy, suma de meses de calendario y la fecha de `hasta` (`fechaDeHasta`). |
+| `src/lib/view.ts` | La vista abierta, en el hash de la URL (`#buscador`, `#marcas`, `#prospectos`, `#base-aire`). |
+| `src/hooks/useCruceZoho.ts` | La consulta del cruce con Zoho de una vista: cancelable, con «Reintentar» estable y sin enseñar nunca un cruce viejo como actual. |
+| `src/pages/` | Vistas: `Buscador`, `Dashboard` (Análisis de Marcas), `Prospectos` y `BaseInstalada`. |
+| `src/components/` | Piezas de vista: `CeldaCliente`, la celda de la columna «Cliente» (con o sin las fechas del OCMA). |
 | `src/App.tsx` | Shell: carga, errores y navegación. |
 
-La lógica pura vive en `src/lib/` con tests unitarios; los componentes de
+La lógica pura vive en `src/lib/` con tests unitarios; `src/hooks/`,
 `src/pages/` y `src/components/` solo la orquestan y la pintan.
 
 ## Carga y cache
@@ -69,6 +74,11 @@ según lo que encuentre al arrancar:
   la lectura del cuerpo. Si datos.gov.co no contesta, la carga falla con
   «datos.gov.co no respondió en 60 s» en vez de dejar el spinner girando sin
   botón de Reintentar.
+- **La clave va versionada (`labs_cache_v3_*`).** Al cambiar la forma de
+  `Laboratorio` se sube `CACHE_VERSION` y las claves viejas se borran
+  activamente (`LEGACY_CACHE_KEYS`): sus ~3 MB impedirían escribir las nuevas.
+  La v3 (2026-11-27) añadió `estacion` y `serie`. Al desplegarla, cada usuario
+  vuelve a descargar el dataset entero una vez.
 
 ## Notas sobre los datos
 
@@ -123,10 +133,55 @@ curl -s "https://www.datos.gov.co/resource/2waz-acaa.json?\$select=componente,co
 
 `equipment.ts` mapea códigos de designación (US EPA / UNE-EN) a marca/modelo/
 contaminante. Esos códigos se buscan como subcadena dentro del texto libre del
-campo «método». Estado real: **38 de los 46 códigos aparecen** en el dataset, y
-**432 de los 1.306 registros** de calidad del aire (33%) citan alguno — el resto
-usa normas internas sin código. Si el IDEAM acredita un equipo nuevo, hay que
-añadirlo aquí o no aparecerá en el Análisis de Marcas.
+campo «método». Si el IDEAM acredita un equipo nuevo, hay que añadirlo aquí o
+no aparecerá en el Análisis de Marcas ni tendrá marca en la Base instalada.
+
+- **Fuente:** la «List of Designated Reference and Equivalent Methods» de la
+  EPA, edición del 28 de julio de 2026
+  ([PDF](https://www.epa.gov/system/files/documents/2026-07/amtic-list-july-2026_508-compliant.pdf)).
+  Se pasa a texto con `pdftotext -layout`. Marca, modelo y contaminante salen
+  del texto de cada designación.
+- **Estado (2026-11-27):** 82 códigos: los 46 del prototipo (dos son la norma
+  UNE-EN 16450) y 36 que cita el dataset de aire y faltaban. Las filas de aire
+  citan 74 códigos EPA distintos y 73 están en la tabla. El otro, que el
+  dataset escribe «RFNA-1289-0704», no está en la lista de la EPA y sale «Sin
+  identificar».
+- **Varios fabricantes:** un código que cubre varios los trae unidos con « / »
+  («Tisch Environmental / New Star Environmental»).
+- **Marcas (`marcasDe`, en `src/lib/marcas.ts`):** el texto de marca se parte
+  por « / » y cada fabricante es una opción. Una lista explícita
+  (`GRUPOS_DE_EMPRESA`) junta, con una etiqueta fija, los nombres de una misma
+  empresa:
+  - «Environnement S.A. / ENVEA»;
+  - «BGI Inc. / Mesa Laboratories Inc.»;
+  - «Ecotech / Acoem»;
+  - «Graseby Andersen / Sierra-Andersen / General Metal Works»;
+  - «Thermo Scientific», que incluye Thermo Environmental, Thermo Andersen y
+    Rupprecht & Patashnick;
+  - «Teledyne API», que incluye Advanced Pollution Instrumentation. Teledyne
+    Monitor Labs queda aparte.
+
+  El Análisis de Marcas (`listBrands`, `listModels`, `groupLabsByEquipment`)
+  usa la misma regla.
+- **Contaminante:** PM10, PM2.5 y PM10-2.5 son «Partículas». Los analizadores
+  de olores (H₂S, TRS, NH₃) se acreditan con su designación de SO₂ o de NOx, y
+  así salen.
+- **Códigos con espacios y erratas:** `normalizarCodigosEpa` (en
+  `equipment.ts`, la usa `extractEquipment`) pasa a guiones los códigos escritos
+  con espacios («EQPM 0311-195») y aplica un mapa explícito de erratas,
+  `ERRATAS_DE_CODIGO`. Hoy tiene una entrada: «RFNA 0506-158» es en realidad
+  RFCA-0506-158, el monitor de CO Horiba APMA-370.
+- **Marcas blancas:** el Horiba APDA-371, los Spirant BAM1000 y BAM1100
+  (Ecotech/Acoem) y el Sibata GBAM son el Met One BAM vendido con otro nombre.
+  En Colombia son Met One, así que no cuentan como esas marcas: el filtro
+  «Horiba» solo enseña equipos Horiba reales. La tabla deja fuera otras marcas
+  blancas a propósito.
+- **Corregido el 2026-11-27:** nueve entradas del prototipo no cuadraban con la
+  lista de la EPA. EQPM-0308-170, EQPM-0715-266, RFSA-0616-237 y EQPM-0923-262
+  tenían la marca o el modelo de otro código. A EQPM-0798-122 le faltaban
+  Horiba y los demás fabricantes, y a los cuatro Horiba, su modelo -380. Se
+  añadieron además variantes de modelo a EQOA-0193-091, EQSA-0193-092 y
+  RFNA-0118-249, y el BAM 1020-1.
 
 ## Prospectos de grasas y aceites
 
@@ -202,15 +257,69 @@ más: ni importes, ni nombres, ni identificadores.
   dígito de verificación pegado (10 dígitos) y no cruza hasta que se corrija
   en Zoho.
 
+## Base instalada de aire
+
+Vista `#base-aire`: una fila por equipo de aire acreditado (cifras del
+2026-11-27: 1.275 equipos de 64 laboratorios en 14 departamentos; 39 «Sin
+identificar» y 85 Horiba). Sirve para conocer la base instalada de la
+competencia, encontrar equipos Horiba y planificar visitas por región.
+
+- **Qué entra:** registros `Activa`, matriz `Aire`, componente «Calidad del
+  Aire» u «Olores Ofensivos» (cualquier grafía, tras `normalizeComponente`) y
+  con número de serie. Fuentes fijas, ruido y vibraciones no traen equipos.
+- **Valor vacío:** en blanco, solo guiones, o «No aplica», «N/A» o «NA», sin
+  distinguir mayúsculas (`esValorVacio`). `mapRecord` solo guarda `estacion` y
+  `serie` cuando traen valor.
+- **Un equipo** es la pareja código de laboratorio + serie, con la serie en
+  mayúsculas para comparar. El campo de equipo se parte (`separarSeries`) por
+  comas, puntos y comas y saltos de línea, porque una fila puede listar 30
+  muestreadores. También se parte por `-`, `–`, `—` o `/` cuando ese carácter
+  tiene un espacio al menos a un lado («1001 - 1002»). Un guion o una
+  barra pegados por los dos lados siguen dentro de la serie («XY-12345-678/2»). Sin
+  código de laboratorio, el equipo se agrupa por el nombre.
+- **Ficha:** cada dato es el primero con valor entre sus filas. Las
+  estaciones, las variables y los códigos EPA van sin repetir; la vigencia más
+  próxima es la fecha `hasta` más temprana.
+- **Marca y modelo** salen del código EPA que cita el método, con la regla de
+  marcas de «El catálogo de equipos se mantiene a mano». Un código escrito con
+  espacios («EQPM 0311-195») también vale. Si un código cubre varios
+  fabricantes, salen juntos, porque el dataset no dice cuál es. Sin código
+  conocido, «Sin identificar»; el código queda en la columna «Códigos EPA».
+- **Filtros:**
+  - búsqueda por laboratorio, NIT, estación o serie, sin tildes ni mayúsculas;
+  - departamento y ciudad (solo las del departamento elegido);
+  - marca: cada fabricante por separado, también los que comparten código,
+    las empresas con varios nombres como una sola opción, y «Sin
+    identificar»;
+  - cliente.
+- **Orden:** departamento, ciudad, laboratorio, código de laboratorio,
+  estación («Sin estación» al final) y serie.
+- **Tabla:** los códigos EPA se enseñan uno por línea. Es un componente local
+  memoizado y sus filas llevan por clave el `id` de la agrupación, para que
+  `useDeferredValue` funcione y escribir en la búsqueda no se trabe.
+- **Columna «Cliente»:** el mismo cruce con Zoho que Prospectos
+  (`useCruceZoho`), sin las fechas del OCMA. Si falla, sale el aviso con
+  «Reintentar» y la vista sigue funcionando.
+- **Excel:**
+  - lo que se ve, en `base-instalada-aire-<AAAA-MM-DD>.xlsx`, con una hoja
+    «Base instalada de aire» de 18 columnas;
+  - las listas van unidas con «; », y la marca n.º i va con el modelo n.º i;
+  - lleva los datos de contacto, como el de Prospectos.
+- **Sin paginar:** son ~1.300 filas. Si en el navegador se nota lenta, se
+  pagina con `lib/pagination.ts` (ver «Mejoras pendientes»).
+
 ## Mejoras pendientes
 
 - Cruce con Zoho:
-  - Cada vez que se abre `#prospectos` se hace una consulta: ir y volver entre
-    el Buscador y Prospectos seis veces en un minuto da 429. Sale el aviso
-    genérico y «Reintentar» falla hasta que pasa el minuto. Mejoras posibles:
-    decir «espera un minuto», o guardar el último cruce en memoria unos
-    minutos.
-  - «Reintentar» desaparece al pulsarlo y el foco de teclado se pierde.
+  - El límite de 5 peticiones por minuto y usuario lo comparten ahora dos
+    vistas, y cada una consulta al abrirse: ir y volver entre el Buscador,
+    Prospectos y la Base instalada seis veces en un minuto da 429. Sale el
+    aviso genérico y «Reintentar» falla hasta que pasa el minuto. Mejoras
+    posibles: guardar el último cruce en memoria unos minutos, o un mensaje
+    propio del 429 («espera un minuto»).
+  - «Reintentar» desaparece al pulsarlo y el foco de teclado se pierde, en
+    las dos vistas. Una solución es un componente compartido, `AvisoErrorZoho`,
+    que conserve el foco.
   - Si el dataset pasara de 150 laboratorios de grasas y aceites, hub-api
     rechazaría la petición (400): habría que partirla.
 - El cache completo (~3 MB) va a `localStorage`, que comparte los ~5 MB del
@@ -228,3 +337,16 @@ más: ni importes, ni nombres, ni identificadores.
   lo que exigía la API key en el bundle, y ejecutaba código del modelo con
   `new Function`). Si se retoma, debe ir tras un proxy en `hub-api` con la key
   server-side y sin ejecutar código generado.
+- Base instalada de aire:
+  - Fase 2, el mapa de estaciones. Necesita mapear `latitud` y `longitud`,
+    Leaflet, autorizar las teselas de OpenStreetMap en la CSP del portal
+    (`img-src` en `apps/portal/nginx.conf`) y aceptar peticiones a un servicio
+    externo.
+  - No se cruza la serie con el maestro de equipos de Desk 2.0, ni se deduce
+    la marca del formato de la serie.
+  - Comprobar en el navegador la velocidad al escribir con unas 1.275 filas
+    sin paginar; si va lenta, paginar con `lib/pagination.ts`.
+  - Mover `clave`, `distintos` y `compararTexto` de `lib/prospects.ts` a
+    `lib/texto.ts`, y `nitCoincide` a `lib/clientes.ts`. Hoy `baseInstalada.ts`
+    importa `clave`, `distintos` y `nitCoincide` de `prospects.ts`, y
+    `compararTexto` está duplicada en los dos ficheros.

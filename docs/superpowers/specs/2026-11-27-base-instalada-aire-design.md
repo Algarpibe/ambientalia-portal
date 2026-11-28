@@ -285,3 +285,33 @@ nombres, NIT y series inventados.
 4. Columna «Cliente» reutilizando el cruce con Zoho, sin las fechas del OCMA.
 5. Los datos salen de la descarga que la app ya hace (caché v3), no de una
    consulta aparte ni de hub-api.
+
+## Cambios acordados durante la implementación
+
+Aprobados por el usuario después de aprobar este diseño:
+
+- `separarSeries` también parte por `-`, `–`, `—` o `/` cuando ese carácter
+  tiene un espacio al menos a un lado; pegado por los dos lados, queda en la
+  serie.
+- El orden desempata también por código de laboratorio.
+- Nueva regla de marcas, `marcasDe` en `lib/marcas.ts`: el texto de marca se
+  parte por « / » y una lista explícita (`GRUPOS_DE_EMPRESA`) junta los
+  nombres de una misma empresa con una etiqueta fija.
+- «Thermo Scientific» absorbe a Thermo Environmental, Thermo Andersen y
+  Rupprecht & Patashnick; «Teledyne API» absorbe a Advanced Pollution
+  Instrumentation (Teledyne Monitor Labs sigue aparte).
+- El Análisis de Marcas (`listBrands`, `listModels`, `groupLabsByEquipment`)
+  usa la misma regla de marcas.
+- Correcciones de la tabla contra la lista de la EPA (28 de julio de 2026),
+  con variantes de modelo para EQOA-0193-091, EQSA-0193-092 y RFNA-0118-249, y
+  el BAM 1020-1.
+- Marcas blancas: Horiba APDA-371, Spirant BAM1000/BAM1100 (Ecotech/Acoem) y
+  Sibata GBAM son el Met One BAM con otro nombre; en Colombia son Met One y no
+  cuentan como esa marca.
+- `normalizarCodigosEpa` pasa a `equipment.ts`, la usa `extractEquipment` y
+  aplica un mapa de erratas (`ERRATAS_DE_CODIGO`): «RFNA 0506-158» es
+  RFCA-0506-158.
+- La tabla de la página es un componente local memoizado, con filas por `id`
+  de la agrupación y los códigos EPA uno por línea.
+- El cruce con Zoho vive en `hooks/useCruceZoho.ts`, que usa también
+  Prospectos; `reintentar` es estable.
