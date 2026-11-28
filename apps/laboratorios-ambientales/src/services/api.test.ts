@@ -78,6 +78,44 @@ describe('mapRecord', () => {
     expect(lab.metodo).toBe('');
     expect(lab.estado).toBe('');
   });
+
+  // Estación y serie ficticias: el repo es público.
+  it('pone estacion y serie cuando el dataset trae valor, recortadas', () => {
+    const lab = mapRecord({
+      ...RAW,
+      nombre_de_la_estaci_n: ' Estación Ficticia Centro ',
+      identificaci_n_de_equipo: 'SN-0001 ',
+    });
+    expect(lab.estacion).toBe('Estación Ficticia Centro');
+    expect(lab.serie).toBe('SN-0001');
+  });
+
+  // Sin la clave, el cache no crece en los ~18 000 registros que no traen equipo.
+  it('sin valor, con «No aplica» o con «---», estacion y serie no existen', () => {
+    for (const vacio of ['', '   ', 'No aplica', 'NO APLICA', '---', 'N/A']) {
+      const lab = mapRecord({ ...RAW, nombre_de_la_estaci_n: vacio, identificaci_n_de_equipo: vacio });
+      expect('estacion' in lab, vacio).toBe(false);
+      expect('serie' in lab, vacio).toBe(false);
+    }
+    expect('serie' in mapRecord(RAW)).toBe(false);
+  });
+
+  it('estacion y serie se tratan por separado: con estación y serie vacía, solo hay estacion', () => {
+    const lab = mapRecord({
+      ...RAW,
+      nombre_de_la_estaci_n: 'Estación Ficticia Norte',
+      identificaci_n_de_equipo: 'No aplica',
+    });
+    expect(lab.estacion).toBe('Estación Ficticia Norte');
+    expect('serie' in lab).toBe(false);
+  });
+
+  // El registro conserva el texto tal cual; separarSeries es quien lo reduce a
+  // ninguna serie (ver baseInstalada.test.ts).
+  it('un campo de equipo con solo rellenos separados por coma se guarda como serie', () => {
+    const lab = mapRecord({ ...RAW, identificaci_n_de_equipo: '---, No aplica' });
+    expect(lab.serie).toBe('---, No aplica');
+  });
 });
 
 describe('fetchLaboratorios', () => {
@@ -177,10 +215,10 @@ describe('fetchLaboratorios', () => {
 // null, así que el camino del cache no se ejecutaría ni una vez.
 describe('fetchLaboratorios: cache de localStorage', () => {
   // La clave lleva versión: el esquema de Laboratorio cambió y un cache escrito
-  // por la versión anterior no debe leerse con el nuevo. Ver el describe de
-  // «migración del cache v1» más abajo.
-  const CACHE_KEY_DATA = 'labs_cache_v2_data';
-  const CACHE_KEY_TIMESTAMP = 'labs_cache_v2_timestamp';
+  // por una versión anterior no debe leerse con el nuevo. Ver los describe de
+  // «migración del cache v1» y «v2» más abajo.
+  const CACHE_KEY_DATA = 'labs_cache_v3_data';
+  const CACHE_KEY_TIMESTAMP = 'labs_cache_v3_timestamp';
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
   // Doble en memoria: solo los métodos que api.ts usa. `store` queda expuesto
@@ -414,7 +452,7 @@ describe('fetchLaboratorios: cache de localStorage', () => {
 
     // Sin esto, los ~3 MB de la v1 no se liberarían nunca en quien ya tenga
     // cache nuevo, y ocupan buena parte de los ~5 MB del origen.
-    it('borra la v1 aunque el cache v2 esté fresco y no se toque la red', async () => {
+    it('borra la v1 aunque el cache v3 esté fresco y no se toque la red', async () => {
       const { store } = stubLocalStorage({
         ...cacheDe([mapRecord(RAW)]),
         [V1_KEY_DATA]: JSON.stringify([REGISTRO_V1]),
@@ -428,6 +466,43 @@ describe('fetchLaboratorios: cache de localStorage', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(store.has(V1_KEY_DATA)).toBe(false);
       expect(store.has(V1_KEY_TIMESTAMP)).toBe(false);
+    });
+  });
+
+  // La v2 no traía estacion ni serie: leída con el esquema nuevo, la Base
+  // instalada de aire saldría vacía durante 24 h. Y sus ~3 MB impedirían
+  // escribir la v3 por cuota.
+  describe('migración del cache v2', () => {
+    const V2_KEY_DATA = 'labs_cache_v2_data';
+    const V2_KEY_TIMESTAMP = 'labs_cache_v2_timestamp';
+    const cacheV2 = () => ({
+      [V2_KEY_DATA]: JSON.stringify([mapRecord(RAW)]),
+      [V2_KEY_TIMESTAMP]: String(Date.now()),
+    });
+
+    it('ignora un cache v2 fresco, descarga y borra sus claves', async () => {
+      const { store } = stubLocalStorage(cacheV2());
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const data = await fetchLaboratorios();
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(data).toHaveLength(2);
+      expect(store.has(V2_KEY_DATA)).toBe(false);
+      expect(store.has(V2_KEY_TIMESTAMP)).toBe(false);
+    });
+
+    it('borra la v2 aunque el cache v3 esté fresco y no se toque la red', async () => {
+      const { store } = stubLocalStorage({ ...cacheDe([mapRecord(RAW)]), ...cacheV2() });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      await fetchLaboratorios();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(store.has(V2_KEY_DATA)).toBe(false);
+      expect(store.has(V2_KEY_TIMESTAMP)).toBe(false);
     });
   });
 });

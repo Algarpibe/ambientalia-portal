@@ -24,6 +24,10 @@ export type Laboratorio = {
   actoAdministrativo: string;
   desde: string;
   hasta: string;
+  // Solo existen si el dataset trae valor (esValorVacio, en lib/baseInstalada.ts).
+  // Los usa la Base instalada de aire.
+  estacion?: string;
+  serie?: string;
 };
 
 export type FilterState = {

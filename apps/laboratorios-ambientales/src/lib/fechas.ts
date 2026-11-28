@@ -23,3 +23,12 @@ export function sumarMeses(fecha: string, meses: number): string {
   const ultimoDia = new Date(Date.UTC(anioFinal, mesFinal + 1, 0)).getUTCDate();
   return `${anioFinal}-${dos(mesFinal + 1)}-${dos(Math.min(dia, ultimoDia))}`;
 }
+
+// `hasta` llega como «2027-04-21T00:00:00.000» o como «---»; otra cosa no es una
+// fecha. La usan Prospectos y la Base instalada de aire.
+const FECHA_ISO = /^(\d{4}-\d{2}-\d{2})/;
+
+export function fechaDeHasta(hasta: string): string | null {
+  const encontrada = FECHA_ISO.exec(hasta.trim());
+  return encontrada ? encontrada[1] : null;
+}

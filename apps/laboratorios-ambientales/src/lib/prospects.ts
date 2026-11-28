@@ -1,5 +1,5 @@
 import type { Laboratorio } from '../types';
-import { sumarMeses } from './fechas';
+import { fechaDeHasta, sumarMeses } from './fechas';
 
 // Ambientalia vende el Horiba OCMA-500, que mide grasas y aceites por
 // infrarrojo. Quien ya usa infrarrojo es oportunidad de servicio, consumibles o
@@ -55,8 +55,9 @@ export const ETIQUETA_VIGENCIA: Record<EstadoVigencia, string> = {
 };
 
 // Minúsculas, sin tildes y con los espacios colapsados: el dataset es de captura
-// manual y la misma palabra llega con varias grafías.
-function clave(texto: string): string {
+// manual y la misma palabra llega con varias grafías. También la usa la búsqueda
+// de la Base instalada de aire.
+export function clave(texto: string): string {
   return texto
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -89,24 +90,18 @@ export function esInfrarrojo(registro: Pick<Laboratorio, 'tecnica' | 'metodo'>):
   return METODO_INFRARROJO.test(clave(registro.metodo));
 }
 
-// `hasta` llega como «2027-04-21T00:00:00.000» o como «---».
-const FECHA_ISO = /^(\d{4}-\d{2}-\d{2})/;
-
-function fechaDeHasta(hasta: string): string | null {
-  const encontrada = FECHA_ISO.exec(hasta.trim());
-  return encontrada ? encontrada[1] : null;
-}
-
 const compararTexto = (a: string, b: string): number => a.localeCompare(b, 'es');
 
-function distintos(valores: string[]): string[] {
+// Distintos, recortados, sin vacíos y ordenados en español.
+export function distintos(valores: string[]): string[] {
   return [...new Set(valores.map((valor) => valor.trim()).filter(Boolean))].sort(compararTexto);
 }
 
 function aProspecto(filas: Laboratorio[]): Prospecto {
   // El primer valor no vacío en el orden del dataset: el contacto o el teléfono
-  // faltan a menudo en una fila y están en otra del mismo laboratorio.
-  const primero = (campo: keyof Laboratorio): string => {
+  // faltan a menudo en una fila y están en otra del mismo laboratorio. estacion
+  // y serie quedan fuera: son opcionales y aquí no hacen falta.
+  const primero = (campo: Exclude<keyof Laboratorio, 'estacion' | 'serie'>): string => {
     for (const fila of filas) {
       const valor = fila[campo].trim();
       if (valor) return valor;
@@ -180,15 +175,21 @@ export function sortProspects(prospectos: Prospecto[]): Prospecto[] {
 const PARECE_NIT = /^[\d\s.-]+$/;
 const soloCifras = (texto: string): string => texto.replace(/\D/g, '');
 
+// ¿Casa el NIT con lo buscado? `busqueda` ya pasó por clave; vacía, casa con
+// todo. La usan Prospectos y la Base instalada de aire.
+export function nitCoincide(nit: string, busqueda: string): boolean {
+  if (clave(nit).includes(busqueda)) return true;
+  const cifras = PARECE_NIT.test(busqueda) ? soloCifras(busqueda) : '';
+  return cifras !== '' && soloCifras(nit).includes(cifras);
+}
+
 export function filterProspects(prospectos: Prospecto[], filtros: FiltrosProspectos): Prospecto[] {
   const busqueda = clave(filtros.busqueda);
-  const cifras = PARECE_NIT.test(busqueda) ? soloCifras(busqueda) : '';
   return prospectos.filter((prospecto) => {
     if (prospecto.grupo !== filtros.grupo) return false;
     if (filtros.departamento && prospecto.departamento !== filtros.departamento) return false;
     if (!busqueda) return true;
-    if (clave(prospecto.nombre).includes(busqueda) || clave(prospecto.nit).includes(busqueda)) return true;
-    return cifras !== '' && soloCifras(prospecto.nit).includes(cifras);
+    return clave(prospecto.nombre).includes(busqueda) || nitCoincide(prospecto.nit, busqueda);
   });
 }
 

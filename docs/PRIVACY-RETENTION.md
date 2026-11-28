@@ -37,7 +37,9 @@ supresión** en esta capa técnica.
 - **Dirección** del cliente (`billing_address` → `address`, `city`), en el modal de
   *detalle* de factura/OV de **Contabilidad** y **Conciliador de Pagos**.
 - **Si un NIT es cliente**, en **Laboratorios ambientales**
-  (`POST /api/laboratorios/clientes`). La app envía NIT que ya son públicos (el
+  (`POST /api/laboratorios/clientes`), desde dos vistas con la misma petición:
+  Prospectos de grasas y aceites y Base instalada de aire. La app envía NIT que
+  ya son públicos (el
   dataset del IDEAM en datos.gov.co) y recibe, de los que están en Zoho, solo
   tres fechas: la de la última factura, la del último OCMA vendido y la de los
   últimos repuestos de OCMA. No salen nombres, importes ni identificadores. El
@@ -55,7 +57,9 @@ personal (Ley 1581 de 2012).
 
 En **Laboratorios ambientales** la finalidad es otra: **prospección comercial**,
 saber si un laboratorio acreditado ante el IDEAM ya es cliente, desde cuándo no
-compra y si tiene un OCMA. Base legal: el interés legítimo de Ambientalia en
+compra y si tiene un OCMA. La Base instalada de aire tiene la misma finalidad
+con los dueños de equipos de aire: enseña el estado y la fecha de la última
+factura, sin las del OCMA. Base legal: el interés legítimo de Ambientalia en
 atender a sus clientes y prospectos, con datos que salen de los registros
 propios (facturas) y de un dataset público. Si el laboratorio es persona
 natural, «es cliente y compró en tal fecha» es dato personal: por eso solo

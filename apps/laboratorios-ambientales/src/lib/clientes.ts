@@ -1,4 +1,3 @@
-import type { Prospecto } from './prospects';
 import { sumarMeses } from './fechas';
 
 // Cruce de los prospectos con Zoho Books por NIT. Ver
@@ -79,23 +78,29 @@ export function estadoCliente(nit: string, cruce: CruceZoho, hoy: string): Estad
   return hechos.ultimaFactura >= sumarMeses(hoy, -MESES_CLIENTE_ACTIVO) ? 'activo' : 'antiguo';
 }
 
-/** Los NIT base que se envían a hub-api: sin repetir y ordenados. */
-export function nitsParaConsultar(prospectos: Prospecto[]): string[] {
+/**
+ * Los NIT base que se envían a hub-api: sin repetir y ordenados. Vale para
+ * cualquier lista con `nit`: prospectos o equipos de la base instalada.
+ */
+export function nitsParaConsultar(elementos: readonly { nit: string }[]): string[] {
   const nits = new Set<string>();
-  for (const prospecto of prospectos) {
-    const base = nitBase(prospecto.nit);
+  for (const elemento of elementos) {
+    const base = nitBase(elemento.nit);
     if (base !== null) nits.add(base);
   }
   return [...nits].sort();
 }
 
-/** Sin estado elegido, o sin cruce (cargando o con error), no filtra. */
-export function filtrarPorCliente(
-  prospectos: Prospecto[],
+/**
+ * Sin estado elegido, o sin cruce (cargando o con error), no filtra y devuelve
+ * la misma lista. Vale para cualquier elemento con `nit` y devuelve su tipo.
+ */
+export function filtrarPorCliente<T extends { nit: string }>(
+  elementos: T[],
   estado: EstadoCliente | '',
   cruce: CruceZoho | null,
   hoy: string,
-): Prospecto[] {
-  if (estado === '' || cruce === null) return prospectos;
-  return prospectos.filter((prospecto) => estadoCliente(prospecto.nit, cruce, hoy) === estado);
+): T[] {
+  if (estado === '' || cruce === null) return elementos;
+  return elementos.filter((elemento) => estadoCliente(elemento.nit, cruce, hoy) === estado);
 }

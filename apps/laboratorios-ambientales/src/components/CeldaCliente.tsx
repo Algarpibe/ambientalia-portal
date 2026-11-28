@@ -6,6 +6,9 @@ type Props = {
   cruce: CruceZoho | null;
   estadoCruce: EstadoCruce;
   hoy: string;
+  // Las fechas del OCMA solo tienen sentido en Prospectos: la Base instalada de
+  // aire pasa false y enseña solo el estado y la última factura.
+  conOcma?: boolean;
 };
 
 // La etiqueta lleva siempre su texto: el color solo acompaña.
@@ -17,7 +20,7 @@ const INSIGNIA_CLIENTE: Record<EstadoCliente, string> = {
   'sin-nit': 'bg-slate-100 text-slate-600',
 };
 
-export default function CeldaCliente({ nit, cruce, estadoCruce, hoy }: Props) {
+export default function CeldaCliente({ nit, cruce, estadoCruce, hoy, conOcma = true }: Props) {
   // El aviso para lectores de pantalla va en la línea del recuento, una sola vez.
   if (estadoCruce === 'cargando') return <span className="text-xs text-slate-500">Consultando…</span>;
   if (estadoCruce === 'error' || cruce === null) return <span className="text-slate-500">—</span>;
@@ -34,8 +37,10 @@ export default function CeldaCliente({ nit, cruce, estadoCruce, hoy }: Props) {
       {hechos?.ultimaFactura && (
         <p className="mt-1 text-xs text-slate-600 whitespace-nowrap">Última factura {hechos.ultimaFactura}</p>
       )}
-      {hechos?.ocmaVendido && <p className="text-xs text-slate-600 whitespace-nowrap">OCMA vendido {hechos.ocmaVendido}</p>}
-      {hechos?.ultimosRepuestos && (
+      {conOcma && hechos?.ocmaVendido && (
+        <p className="text-xs text-slate-600 whitespace-nowrap">OCMA vendido {hechos.ocmaVendido}</p>
+      )}
+      {conOcma && hechos?.ultimosRepuestos && (
         <p className="text-xs text-slate-600 whitespace-nowrap">Repuestos OCMA {hechos.ultimosRepuestos}</p>
       )}
     </>
