@@ -251,7 +251,7 @@ describe('agruparEquipos', () => {
     ];
     const ids = agruparEquipos(entrada).map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBeGreaterThanOrEqual(4);
+    expect(ids).toHaveLength(5);
     expect(agruparEquipos(entrada).map((e) => e.id)).toEqual(ids);
   });
 

@@ -76,7 +76,7 @@ export function mapRecord(record: Record<string, string | undefined>): Laborator
 
 // Se llama antes de leer el cache, y también cuando el cache nuevo está fresco:
 // si solo se purgara al descargar, quien ya tenga el cache vigente arrastraría los ~3 MB
-// de la v1 para siempre.
+// de las versiones anteriores para siempre.
 function purgeLegacyCache(): void {
   try {
     for (const key of LEGACY_CACHE_KEYS) localStorage.removeItem(key);
