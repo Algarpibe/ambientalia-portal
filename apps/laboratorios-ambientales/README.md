@@ -305,7 +305,7 @@ competencia, encontrar equipos Horiba y planificar visitas por región.
     «Base instalada de aire» de 18 columnas;
   - las listas van unidas con «; », y la marca n.º i va con el modelo n.º i;
   - lleva los datos de contacto, como el de Prospectos.
-- **Sin paginar:** son ~1.300 filas. Si en el navegador se nota lenta, se
+- **Sin paginar:** son unas 1.275 filas. Si en el navegador se nota lenta, se
   pagina con `lib/pagination.ts` (ver «Mejoras pendientes»).
 
 ## Mejoras pendientes
