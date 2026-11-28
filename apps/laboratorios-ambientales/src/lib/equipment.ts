@@ -11,21 +11,16 @@
 // PM10, PM2.5 y PM10-2.5 son «Partículas», como en el catálogo original.
 // El 2026-11-27 se corrigieron nueve entradas del prototipo que no cuadraban con
 // la lista: marca o modelo de otro código, un modelo genérico («PM Monitor») o
-// sin Horiba o su -380.
+// sin el -380 de Horiba.
+// Horiba APDA-371, Spirant BAM1000/BAM1100 (Ecotech/Acoem) y Sibata GBAM son el
+// Met One BAM con otro nombre: marcas blancas, como las que la tabla deja fuera
+// a propósito. En Colombia son Met One, así que no van en la marca.
 export type Equipo = { brand: string; model: string; pollutant: string };
 export type EquipoIdentificado = Equipo & { code: string };
 
 export const EQUIPMENT_MAP: Record<string, Equipo> = {
-  'EQPM-0798-122': {
-    brand: 'Met One Instruments, Inc. / Sibata / Horiba / Ecotech / Acoem',
-    model: 'BAM 1020 / GBAM 1020 / BAM 1020-1 / GBAM 1020-1 / APDA-371 / Spirant BAM1000',
-    pollutant: 'Partículas',
-  },
-  'EQPM-0308-170': {
-    brand: 'Met One Instruments, Inc. / Horiba / Ecotech / Acoem',
-    model: 'BAM-1020 / APDA-371 / Spirant BAM1100',
-    pollutant: 'Partículas',
-  },
+  'EQPM-0798-122': { brand: 'Met One Instruments, Inc.', model: 'BAM 1020 / BAM 1020-1', pollutant: 'Partículas' },
+  'EQPM-0308-170': { brand: 'Met One Instruments, Inc.', model: 'BAM-1020', pollutant: 'Partículas' },
   'EQSA-0495-100': { brand: 'Teledyne API', model: '100 Series', pollutant: 'SO₂' },
   'EQSA-0507-166': { brand: 'SIR S.A.', model: 'S-5001', pollutant: 'SO₂' },
   'RFNA-1194-099': { brand: 'Teledyne API', model: '200E / T200 / N200 Series', pollutant: 'NOx' },
@@ -69,15 +64,11 @@ export const EQUIPMENT_MAP: Record<string, Equipo> = {
   'EQOA-0415-222': { brand: 'Sabio', model: '6030 Ozone Analyzer', pollutant: 'O₃' },
   'RFCA-0817-248': { brand: 'Sabio', model: '6050 CO Analyzer', pollutant: 'CO' },
   'EQPM-1013-209': { brand: 'Met One Instruments, Inc.', model: 'BAM-1022', pollutant: 'Partículas' },
-  'EQPM-0715-266': {
-    brand: 'Met One Instruments, Inc. / Ecotech / Acoem',
-    model: 'BAM-1020 / Spirant BAM1100',
-    pollutant: 'Partículas',
-  },
+  'EQPM-0715-266': { brand: 'Met One Instruments, Inc.', model: 'BAM-1020', pollutant: 'Partículas' },
   // Añadidos el 2026-11-27: los 36 códigos que cita el dataset de aire y faltaban.
   'EQOA-0193-091': {
     brand: 'Teledyne Monitor Labs / Casella / Ecotech / Acoem / Aeris / Wedding & Associates',
-    model: 'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 (y sus -11 y -12) / ML9810B / CM2010B / EC9810B / 1010',
+    model: 'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 (los cinco también en -11 y -12) / ML9810B / CM2010B / EC9810B / 1010',
     pollutant: 'O₃',
   },
   'EQOA-0206-148': { brand: 'Environnement S.A. / ENVEA', model: 'O3 42M', pollutant: 'O₃' },

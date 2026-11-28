@@ -17,24 +17,37 @@ describe('EQUIPMENT_MAP', () => {
   // Revisadas contra la lista de la EPA del 28 de julio de 2026.
   it('las entradas del prototipo que no cuadraban con la lista de la EPA, corregidas', () => {
     expect(EQUIPMENT_MAP['EQPM-0308-170']).toEqual({
-      brand: 'Met One Instruments, Inc. / Horiba / Ecotech / Acoem',
-      model: 'BAM-1020 / APDA-371 / Spirant BAM1100',
+      brand: 'Met One Instruments, Inc.',
+      model: 'BAM-1020',
       pollutant: 'Partículas',
     });
     expect(EQUIPMENT_MAP['EQPM-0715-266']).toEqual({
-      brand: 'Met One Instruments, Inc. / Ecotech / Acoem',
-      model: 'BAM-1020 / Spirant BAM1100',
+      brand: 'Met One Instruments, Inc.',
+      model: 'BAM-1020',
       pollutant: 'Partículas',
     });
     expect(EQUIPMENT_MAP['RFSA-0616-237']).toEqual({ brand: 'Sutron / Sabio', model: '6020 SO2 Analyzer', pollutant: 'SO₂' });
     expect(EQUIPMENT_MAP['EQPM-0923-262'].model).toBe('Vair-9009');
-    expect(EQUIPMENT_MAP['EQPM-0798-122'].brand).toContain('Horiba');
+    expect(EQUIPMENT_MAP['EQPM-0798-122']).toEqual({
+      brand: 'Met One Instruments, Inc.',
+      model: 'BAM 1020 / BAM 1020-1',
+      pollutant: 'Partículas',
+    });
+  });
+
+  // Horiba APDA-371, Spirant y Sibata GBAM son marcas blancas del Met One BAM.
+  it('ninguna entrada nombra como modelo las marcas blancas del BAM', () => {
+    for (const [code, equipo] of Object.entries(EQUIPMENT_MAP)) {
+      expect(equipo.model, `${code} nombra APDA-371`).not.toContain('APDA-371');
+      expect(equipo.model, `${code} nombra Spirant`).not.toContain('Spirant');
+      expect(equipo.model, `${code} nombra GBAM`).not.toContain('GBAM');
+    }
   });
 
   // Entradas añadidas que dejaban fuera variantes de modelo que nombra la lista.
   it('las entradas añadidas con variantes de modelo que faltaban, completadas', () => {
     expect(EQUIPMENT_MAP['EQOA-0193-091'].model).toBe(
-      'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 (y sus -11 y -12) / ML9810B / CM2010B / EC9810B / 1010',
+      'ML9810 / CM2010 / EC9810 / AE2010 / AE9810 (los cinco también en -11 y -12) / ML9810B / CM2010B / EC9810B / 1010',
     );
     expect(EQUIPMENT_MAP['EQSA-0193-092'].model).toBe(
       'ML9850 / CM2050 / EC9850 / EC9850T / AE9850 / AE2050 / ML9850B / CM2050B / EC9850B / 1040',
@@ -54,8 +67,8 @@ describe('EQUIPMENT_MAP', () => {
 describe('extractEquipment', () => {
   it('reconoce un código de equipo dentro del texto del método', () => {
     const eq = extractEquipment('Método de referencia EQPM-0798-122 según protocolo');
-    expect(eq?.brand).toBe('Met One Instruments, Inc. / Sibata / Horiba / Ecotech / Acoem');
-    expect(eq?.model).toBe('BAM 1020 / GBAM 1020 / BAM 1020-1 / GBAM 1020-1 / APDA-371 / Spirant BAM1000');
+    expect(eq?.brand).toBe('Met One Instruments, Inc.');
+    expect(eq?.model).toBe('BAM 1020 / BAM 1020-1');
     expect(eq?.pollutant).toBe('Partículas');
   });
 
