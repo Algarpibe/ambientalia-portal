@@ -4,7 +4,7 @@
 import type { Laboratorio } from '../types';
 import type { CruceZoho, EstadoCliente } from './clientes';
 import { filtrarPorCliente } from './clientes';
-import { extractEquipment } from './equipment';
+import { CODIGO_EPA, extractEquipment, normalizarCodigosEpa } from './equipment';
 import { fechaDeHasta } from './fechas';
 import { marcasDe } from './marcas';
 import { clave, distintos, nitCoincide } from './prospects';
@@ -89,19 +89,8 @@ export function esRegistroDeEquipoAire(
   );
 }
 
-// Un código de designación EPA: casi siempre «RFPS-0202-141», a veces con
-// espacios en vez de guiones («EQPM 0311-195», «RFPS- 0202-141»). Sin \b al
-// final a propósito: el dataset escribe una vez «RFNA-1289-0704», que así cuenta
-// como RFNA-1289-070, un código que no está en la lista de la EPA.
-const CODIGO_EPA = /\b(RF|EQ)([A-Z]{2})[\s-]*(\d{4})[\s-]*(\d{3})/g;
-
-// El método con sus códigos EPA escritos con guiones: extractEquipment busca el
-// código como subcadena y, si no, no reconocería «EQPM 0311-195».
-export function normalizarCodigosEpa(metodo: string): string {
-  return metodo.replace(CODIGO_EPA, '$1$2-$3-$4');
-}
-
-// Los códigos EPA que cita un método, con guiones y sin repetir.
+// Los códigos EPA que cita un método, con guiones, con las erratas conocidas
+// corregidas y sin repetir.
 export function codigosEpa(metodo: string): string[] {
   return [...new Set(normalizarCodigosEpa(metodo).match(CODIGO_EPA) ?? [])];
 }
@@ -131,7 +120,7 @@ function aEquipo(id: string, filas: Laboratorio[], serie: string): EquipoInstala
   const pares = new Map<string, MarcaModelo>();
   const codigos = new Set<string>();
   for (const fila of filas) {
-    const identificado = extractEquipment(normalizarCodigosEpa(fila.metodo));
+    const identificado = extractEquipment(fila.metodo);
     if (identificado) {
       pares.set(`${identificado.brand}\n${identificado.model}`, {
         marca: identificado.brand,

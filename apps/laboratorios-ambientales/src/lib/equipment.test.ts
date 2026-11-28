@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EQUIPMENT_MAP, extractEquipment, listBrands, listModels } from './equipment';
+import { EQUIPMENT_MAP, extractEquipment, listBrands, listModels, normalizarCodigosEpa } from './equipment';
 
 describe('EQUIPMENT_MAP', () => {
   it('son 82 códigos: los 46 del catálogo original y 36 de la lista de la EPA', () => {
@@ -119,6 +119,44 @@ describe('extractEquipment', () => {
     expect(EQUIPMENT_MAP['RFNA-1289-070']).toBeUndefined();
     expect(extractEquipment('Método de Referencia Automatizado RFNA-1289-070')).toBeNull();
     expect(extractEquipment('Método de Referencia Automatizado RFNA-1289-0704')).toBeNull();
+  });
+
+  it('reconoce un código escrito con espacios en vez de guiones', () => {
+    const eq = extractEquipment('Apéndice L. EQPM 0311-195');
+    expect(eq?.code).toBe('EQPM-0311-195');
+    expect(eq?.pollutant).toBe('Partículas');
+  });
+
+  // El dataset escribe «RFNA 0506-158» para el monitor de CO de Horiba: es una
+  // errata de RFCA-0506-158.
+  it('«RFNA 0506-158» se reconoce como el monitor de CO de Horiba', () => {
+    const eq = extractEquipment('Método de Referencia Automatizado, Apéndice C. RFNA 0506-158');
+    expect(eq?.code).toBe('RFCA-0506-158');
+    expect(eq?.brand).toBe('Horiba');
+    expect(eq?.model).toBe('APMA-370 / 380');
+    expect(eq?.pollutant).toBe('CO');
+  });
+});
+
+describe('normalizarCodigosEpa', () => {
+  it('pasa a guiones los códigos con espacios', () => {
+    expect(normalizarCodigosEpa('Apéndice L. EQPM 0311-195')).toBe('Apéndice L. EQPM-0311-195');
+    expect(normalizarCodigosEpa('RFPS- 0202-141')).toBe('RFPS-0202-141');
+  });
+
+  it('deja intacto el texto que no es un código EPA', () => {
+    for (const texto of ['Método 5 - 10 ppm', 'NTC 3362 C', 'SM 2320 B', 'Norma UNE-EN 16450', '']) {
+      expect(normalizarCodigosEpa(texto), texto).toBe(texto);
+    }
+  });
+
+  it('corrige la errata RFNA-0506-158 después de normalizar los espacios', () => {
+    expect(normalizarCodigosEpa('RFNA 0506-158')).toBe('RFCA-0506-158');
+    expect(normalizarCodigosEpa('RFNA-0506-158')).toBe('RFCA-0506-158');
+  });
+
+  it('no toca el código real RFNA-0506-157', () => {
+    expect(normalizarCodigosEpa('RFNA 0506-157')).toBe('RFNA-0506-157');
   });
 });
 

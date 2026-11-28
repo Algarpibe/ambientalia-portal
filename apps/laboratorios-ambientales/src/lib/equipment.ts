@@ -154,10 +154,36 @@ export const EQUIPMENT_MAP: Record<string, Equipo> = {
 // match. Se ordena una sola vez: extractEquipment corre por cada registro.
 const CODES_BY_LENGTH = Object.keys(EQUIPMENT_MAP).sort((a, b) => b.length - a.length);
 
+// Un código de designación EPA: casi siempre «RFPS-0202-141», a veces con
+// espacios en vez de guiones («EQPM 0311-195», «RFPS- 0202-141»). Sin \b al
+// final a propósito: el dataset escribe una vez «RFNA-1289-0704», que así cuenta
+// como RFNA-1289-070, un código que no está en la lista de la EPA.
+export const CODIGO_EPA = /\b(RF|EQ)([A-Z]{2})[\s-]*(\d{4})[\s-]*(\d{3})/g;
+
+// Erratas conocidas del dataset: código escrito -> código real. Es una lista de
+// casos concretos, no una regla general.
+// - «RFNA 0506-158» es una errata de RFCA-0506-158 (monitor de CO de Horiba,
+//   APMA-370 / 380). La corrección es segura porque la fila del dataset es de
+//   monóxido de carbono (Apéndice C) y RFNA-0506-158 no es un código real: RFNA
+//   es el prefijo de los NOx, y el de Horiba para NOx es RFNA-0506-157.
+const ERRATAS_DE_CODIGO: Record<string, string> = {
+  'RFNA-0506-158': 'RFCA-0506-158',
+};
+
+// El método con sus códigos EPA escritos con guiones (extractEquipment busca el
+// código como subcadena y, si no, no reconocería «EQPM 0311-195») y con las
+// erratas conocidas ya corregidas. Primero los espacios y después las erratas.
+export function normalizarCodigosEpa(metodo: string): string {
+  return metodo
+    .replace(CODIGO_EPA, '$1$2-$3-$4')
+    .replace(CODIGO_EPA, (codigo) => ERRATAS_DE_CODIGO[codigo] ?? codigo);
+}
+
 export function extractEquipment(metodo: string): EquipoIdentificado | null {
   if (!metodo) return null;
+  const normalizado = normalizarCodigosEpa(metodo);
   for (const code of CODES_BY_LENGTH) {
-    if (metodo.includes(code)) return { code, ...EQUIPMENT_MAP[code] };
+    if (normalizado.includes(code)) return { code, ...EQUIPMENT_MAP[code] };
   }
   return null;
 }

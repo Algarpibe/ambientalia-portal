@@ -11,7 +11,6 @@ import {
   esRegistroDeEquipoAire,
   esValorVacio,
   filtrarEquipos,
-  normalizarCodigosEpa,
   opcionesDeFiltro,
   ordenarEquipos,
   separarSeries,
@@ -190,19 +189,6 @@ describe('codigosEpa', () => {
   });
 });
 
-describe('normalizarCodigosEpa', () => {
-  it('pasa a guiones los códigos con espacios', () => {
-    expect(normalizarCodigosEpa('Apéndice L. EQPM 0311-195')).toBe('Apéndice L. EQPM-0311-195');
-    expect(normalizarCodigosEpa('RFPS- 0202-141')).toBe('RFPS-0202-141');
-  });
-
-  it('deja intacto el texto que no es un código EPA', () => {
-    for (const texto of ['Método 5 - 10 ppm', 'NTC 3362 C', 'SM 2320 B', 'Norma UNE-EN 16450', '']) {
-      expect(normalizarCodigosEpa(texto), texto).toBe(texto);
-    }
-  });
-});
-
 describe('agruparEquipos', () => {
   it('arma la ficha de un equipo a partir de su fila', () => {
     expect(agruparEquipos([fila()])).toEqual([
@@ -247,6 +233,12 @@ describe('agruparEquipos', () => {
       ['201', 'SN-0001'],
       ['202', 'SN-0001'],
     ]);
+  });
+
+  it('un método con la errata «RFNA 0506-158» es el monitor de CO de Horiba', () => {
+    const [equipo] = agruparEquipos([fila({ m_todo: 'Método de Referencia Automatizado, Apéndice C. RFNA 0506-158' })]);
+    expect(equipo.marcasYModelos).toEqual([{ marca: 'Horiba', modelo: 'APMA-370 / 380' }]);
+    expect(equipo.codigosEpa).toEqual(['RFCA-0506-158']);
   });
 
   it('el id es único por equipo y estable para la misma entrada', () => {
