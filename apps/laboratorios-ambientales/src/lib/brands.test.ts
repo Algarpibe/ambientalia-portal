@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Laboratorio } from '../types';
 import { groupLabsByEquipment } from './brands';
+import { EQUIPMENT_MAP } from './equipment';
 
 const lab = (over: Partial<Laboratorio>): Laboratorio => ({
   codigo: '1', estado: 'Activa', matriz: 'Aire', componente: 'Calidad del Aire',
@@ -51,6 +52,24 @@ describe('groupLabsByEquipment', () => {
     const res = groupLabsByEquipment(data, 'Teledyne API', '300 Series');
     expect(res[0].equipos).toHaveLength(1);
     expect(res[0].equipos[0].model).toBe('300 Series');
+  });
+
+  it('filtra por un fabricante que figura dentro de un texto de co-fabricantes', () => {
+    const codigo = Object.entries(EQUIPMENT_MAP).find(
+      ([, e]) => e.brand === 'Tisch Environmental / New Star Environmental',
+    )![0];
+    const data = [lab({ metodo: codigo }), lab({ metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' })];
+    for (const marca of ['Tisch Environmental', 'New Star Environmental']) {
+      const res = groupLabsByEquipment(data, marca, '');
+      expect(res.map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);
+    }
+  });
+
+  it('filtra por el nombre de grupo de una empresa con nombre viejo y nuevo', () => {
+    const codigo = Object.entries(EQUIPMENT_MAP).find(([, e]) => e.brand === 'Environnement S.A. / ENVEA')![0];
+    const data = [lab({ metodo: codigo }), lab({ metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' })];
+    const res = groupLabsByEquipment(data, 'Environnement S.A. / ENVEA', '');
+    expect(res.map((l) => l.nombreLaboratorio)).toEqual(['Lab Uno']);
   });
 
   it('omite los laboratorios que se quedan sin equipos tras filtrar', () => {

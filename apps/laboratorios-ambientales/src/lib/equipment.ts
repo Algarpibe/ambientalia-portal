@@ -1,3 +1,5 @@
+import { marcasDe } from './marcas';
+
 // Catálogo de equipos de calidad del aire acreditados, portado del prototipo.
 // La clave es el código de designación (US EPA / UNE-EN) que aparece embebido en
 // el texto libre del campo «método» del dataset.
@@ -162,13 +164,16 @@ export function extractEquipment(metodo: string): EquipoIdentificado | null {
 
 const compare = (a: string, b: string): number => a.localeCompare(b, 'es');
 
+// Las opciones son los fabricantes (o grupos de una misma empresa) que da
+// marcasDe, no los textos enteros de marca.
 export function listBrands(): string[] {
-  return [...new Set(Object.values(EQUIPMENT_MAP).map((equipo) => equipo.brand))].sort(compare);
+  const marcas = Object.values(EQUIPMENT_MAP).flatMap((equipo) => marcasDe(equipo.brand));
+  return [...new Set(marcas)].sort(compare);
 }
 
 export function listModels(brand: string): string[] {
   const modelos = Object.values(EQUIPMENT_MAP)
-    .filter((equipo) => equipo.brand === brand)
+    .filter((equipo) => marcasDe(equipo.brand).includes(brand))
     .map((equipo) => equipo.model);
   return [...new Set(modelos)].sort(compare);
 }

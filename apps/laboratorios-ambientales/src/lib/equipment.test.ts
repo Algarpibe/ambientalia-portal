@@ -137,4 +137,24 @@ describe('listBrands / listModels', () => {
   it('devuelve lista vacía para una marca desconocida', () => {
     expect(listModels('No Existe')).toEqual([]);
   });
+
+  it('cada fabricante es una opción: ninguna es un texto de co-fabricantes', () => {
+    const brands = listBrands();
+    expect(brands).toContain('Tisch Environmental');
+    expect(brands).toContain('New Star Environmental');
+    expect(brands).not.toContain('Tisch Environmental / New Star Environmental');
+  });
+
+  it('las empresas con nombre viejo y nuevo son una sola opción', () => {
+    const brands = listBrands();
+    expect(brands).toContain('Environnement S.A. / ENVEA');
+    expect(brands).not.toContain('Environnement S.A.');
+    expect(brands).not.toContain('ENVEA');
+  });
+
+  it('los modelos de un fabricante incluyen los de los textos de co-fabricantes', () => {
+    const solo = Object.values(EQUIPMENT_MAP).find((e) => e.brand === 'Tisch Environmental / New Star Environmental')!;
+    expect(listModels('Tisch Environmental')).toContain(solo.model);
+    expect(listModels('New Star Environmental')).toContain(solo.model);
+  });
 });

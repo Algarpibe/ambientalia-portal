@@ -1,6 +1,7 @@
 import type { Laboratorio } from '../types';
 import type { EquipoIdentificado } from './equipment';
 import { extractEquipment } from './equipment';
+import { marcasDe } from './marcas';
 
 export type EquipoDeLab = EquipoIdentificado & { metodo: string };
 
@@ -34,7 +35,7 @@ export function groupLabsByEquipment(data: Laboratorio[], brand: string, model: 
     const equipo = extractEquipment(registro.metodo);
     if (!equipo) continue;
     // brand/model vacíos = sin filtrar.
-    if (brand && equipo.brand !== brand) continue;
+    if (brand && !marcasDe(equipo.brand).includes(brand)) continue;
     if (model && equipo.model !== model) continue;
 
     const clave = registro.nombreLaboratorio;
